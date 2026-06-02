@@ -2,7 +2,7 @@
 
 A self-contained futuristic dashboard prototype with OpenRouter AI, finance tracking, a calendar-style task board, and a feature roadmap.
 
-## Run
+## Run - Please
 
 Open `index.html` in a browser.
 
