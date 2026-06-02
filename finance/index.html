@@ -1,0 +1,343 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BrodieDash Command Center</title>
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body class="locked" data-route="finance">
+    <canvas id="signalCanvas" aria-hidden="true"></canvas>
+    <section class="auth-screen" id="authScreen" aria-label="BrodieDash access">
+      <div class="auth-card">
+        <div class="auth-heading">
+          <p class="eyebrow">Secure Console</p>
+          <h1>BrodieDash Access</h1>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button class="auth-tab active" type="button" data-auth-view="login">Login</button>
+          <button class="auth-tab" type="button" data-auth-view="signup">Sign Up</button>
+        </div>
+        <form class="auth-form" id="loginForm">
+          <label class="field">
+            <span>Username</span>
+            <input id="loginUsername" name="username" autocomplete="username" placeholder="Username" required>
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Password" required>
+          </label>
+          <button class="primary-btn" type="submit">Enter Dashboard</button>
+        </form>
+        <form class="auth-form hidden" id="signupForm">
+          <label class="field">
+            <span>Username</span>
+            <input id="signupUsername" name="username" autocomplete="username" placeholder="New username" required>
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="signupPassword" name="password" type="password" autocomplete="new-password" placeholder="New password" required>
+          </label>
+          <button class="primary-btn" type="submit">Request Access</button>
+        </form>
+        <p class="auth-message" id="authMessage">Admin access is available for the Brodie account.</p>
+      </div>
+    </section>
+    <div class="shell">
+      <aside class="rail" aria-label="Dashboard sections">
+        <div class="brand-mark" aria-label="BrodieDash">BD</div>
+        <a class="rail-btn" data-route-link="ai" href="ai/index.html" aria-label="AI command">AI</a>
+        <a class="rail-btn" data-route-link="finance" href="finance/index.html" aria-label="Finance">FX</a>
+        <a class="rail-btn" data-route-link="calendar" href="calendar/index.html" aria-label="Calendar">CAL</a>
+        <a class="rail-btn" data-route-link="roadmap" href="roadmap/index.html" aria-label="Roadmap">MAP</a>
+        <a class="rail-btn" data-route-link="systems" href="systems/index.html" aria-label="Systems">SYS</a>
+        <a class="rail-btn admin-nav hidden" data-route-link="admin" href="admin/index.html" aria-label="Admin">ADM</a>
+      </aside>
+
+      <main class="dashboard">
+        <header class="topbar">
+          <section class="identity">
+            <p class="eyebrow">Personal Operations Console</p>
+            <h1>BrodieDash</h1>
+          </section>
+          <section class="status-strip" aria-label="System status">
+            <div>
+              <span class="metric-label">Local Time</span>
+              <strong id="clock">--:--</strong>
+            </div>
+            <div>
+              <span class="metric-label">AI Link</span>
+              <strong id="aiLinkStatus">Offline</strong>
+            </div>
+            <div>
+              <span class="metric-label">Focus Load</span>
+              <strong id="focusLoad">0%</strong>
+            </div>
+            <div>
+              <span class="metric-label">User</span>
+              <strong id="currentUserLabel">Locked</strong>
+              <button class="text-btn" id="topLogoutBtn" type="button">Logout</button>
+            </div>
+          </section>
+        </header>
+
+        <section class="hero-grid">
+          <article class="command-panel panel" id="ai-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">OpenRouter Mesh</p>
+                <h2>AI Command Layer</h2>
+              </div>
+              <button class="icon-btn" id="refreshModelsBtn" aria-label="Refresh models" title="Refresh models">â†»</button>
+            </div>
+
+            <div class="api-grid compact">
+              <div class="embedded-key-card">
+                <span class="metric-label">OpenRouter Key</span>
+                <strong id="keyModeLabel">Embedded</strong>
+              </div>
+              <label class="field model-field">
+                <span>Model</span>
+                <select id="modelSelect"></select>
+              </label>
+            </div>
+
+            <div class="quick-actions" aria-label="Prompt presets">
+              <button data-prompt="Summarize my finance risk, tasks, and next best actions in a concise mission brief.">Mission Brief</button>
+              <button data-prompt="Create three ambitious dashboard feature ideas that would make this command center more useful.">Feature Ideas</button>
+              <button data-prompt="Draft a practical weekly plan from my current task list and finance snapshot.">Weekly Plan</button>
+            </div>
+
+            <label class="field prompt-field">
+              <span>Command</span>
+              <textarea id="aiPrompt" rows="5" placeholder="Ask the selected model to analyze your dashboard..."></textarea>
+            </label>
+            <div class="command-row">
+              <label class="toggle">
+                <input id="includeContext" type="checkbox" checked>
+                <span>Use dashboard context</span>
+              </label>
+              <button class="primary-btn" id="runAiBtn">Run Analysis</button>
+            </div>
+            <pre id="aiOutput" class="ai-output">Awaiting command.</pre>
+          </article>
+
+          <article class="panel pulse-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Live Pulse</p>
+                <h2>Operations Snapshot</h2>
+              </div>
+            </div>
+            <div class="pulse-grid">
+              <div class="pulse-cell">
+                <span>Portfolio</span>
+                <strong id="portfolioValue">$0</strong>
+                <small id="portfolioDelta">No positions</small>
+              </div>
+              <div class="pulse-cell">
+                <span>Tasks</span>
+                <strong id="taskCount">0</strong>
+                <small id="taskDelta">Clear runway</small>
+              </div>
+              <div class="pulse-cell">
+                <span>Roadmap</span>
+                <strong id="roadmapCount">0</strong>
+                <small>pinned upgrades</small>
+              </div>
+              <div class="pulse-cell">
+                <span>Automation</span>
+                <strong id="automationScore">72</strong>
+                <small>readiness score</small>
+              </div>
+            </div>
+            <div class="radar-wrap">
+              <canvas id="radarCanvas" width="340" height="250" aria-label="Dashboard radar visualization"></canvas>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel finance-panel" id="finance-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Capital Console</p>
+                <h2>Finance Overview</h2>
+              </div>
+              <div class="finance-actions">
+                <button class="secondary-btn" id="simulatePricesBtn">Simulate Tick</button>
+              </div>
+            </div>
+
+            <div class="finance-console">
+              <section class="finance-hero" aria-label="Portfolio headline">
+                <div class="finance-hero-copy">
+                  <span class="metric-label">Portfolio Value</span>
+                  <strong id="totalValue">$0</strong>
+                  <div class="finance-status-row">
+                    <span id="pnlPill" class="finance-pill">$0</span>
+                    <span id="riskTilt" class="finance-pill">Balanced</span>
+                  </div>
+                  <p id="largestPosition">Largest allocation unavailable</p>
+                </div>
+                <div class="allocation-stage">
+                  <div class="allocation-ring" id="allocationRing">
+                    <span>Allocation</span>
+                    <strong id="financeHealth">--</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section class="finance-summary" aria-label="Portfolio metrics">
+                <div>
+                  <span>Unrealized P/L</span>
+                  <strong id="unrealizedPnL">$0</strong>
+                </div>
+                <div>
+                  <span>Cash Reserve</span>
+                  <strong id="cashReserve">$0</strong>
+                </div>
+                <div>
+                  <span>Diversification</span>
+                  <strong id="diversificationScore">0%</strong>
+                </div>
+              </section>
+
+              <section class="allocation-panel" aria-label="Allocation breakdown">
+                <div class="section-kicker">
+                  <span>Allocation Map</span>
+                  <strong id="allocationSummary">No assets</strong>
+                </div>
+                <div class="allocation-bars" id="allocationBars"></div>
+              </section>
+
+              <div class="position-toolbar">
+                <div>
+                  <span class="metric-label">Positions</span>
+                  <strong id="positionSummary">0 tracked assets</strong>
+                </div>
+                <span class="chip">Manual prices</span>
+              </div>
+
+              <div class="position-stack" id="positionsBody"></div>
+
+              <form class="position-form" id="positionForm">
+                <input name="symbol" maxlength="8" placeholder="Ticker" required>
+                <input name="name" placeholder="Name" required>
+                <input name="qty" type="number" min="0" step="0.01" placeholder="Qty" required>
+                <input name="avg" type="number" min="0" step="0.01" placeholder="Avg" required>
+                <input name="price" type="number" min="0" step="0.01" placeholder="Price" required>
+                <button class="primary-btn" type="submit">Add</button>
+              </form>
+
+              <section class="finance-intel" aria-label="Finance recommendations">
+                <div class="section-kicker">
+                  <span>Capital Intelligence</span>
+                  <strong>Recommended Upgrades</strong>
+                </div>
+                <div class="recommendation-strip" id="financeRecommendations"></div>
+              </section>
+            </div>
+          </article>
+
+          <article class="panel calendar-panel" id="calendar-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Chrono Board</p>
+                <h2>Futuristic Calendar</h2>
+              </div>
+              <div class="calendar-controls">
+                <button class="icon-btn" id="prevMonthBtn" aria-label="Previous month" title="Previous month">â€¹</button>
+                <strong id="monthLabel">Month</strong>
+                <button class="icon-btn" id="nextMonthBtn" aria-label="Next month" title="Next month">â€º</button>
+              </div>
+            </div>
+            <div class="calendar-grid" id="calendarGrid" aria-label="Task calendar"></div>
+            <form class="task-form" id="taskForm">
+              <input name="title" placeholder="Task" required>
+              <input name="date" type="date" required>
+              <select name="priority" aria-label="Priority">
+                <option value="High">High</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="Low">Low</option>
+              </select>
+              <button class="primary-btn" type="submit">Add</button>
+            </form>
+            <div class="task-list" id="taskList"></div>
+          </article>
+
+          <article class="panel features-panel" id="features-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Expansion Matrix</p>
+                <h2>Recommended Modules</h2>
+              </div>
+              <button class="secondary-btn" id="clearRoadmapBtn">Clear Pins</button>
+            </div>
+            <div class="feature-list" id="featureList"></div>
+          </article>
+
+          <article class="panel systems-panel" id="systems-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Systems</p>
+                <h2>Command Metrics</h2>
+              </div>
+            </div>
+            <div class="system-stack">
+              <div class="system-row">
+                <span>OpenRouter model sync</span>
+                <progress id="modelSyncProgress" max="100" value="32"></progress>
+              </div>
+              <div class="system-row">
+                <span>Calendar pressure</span>
+                <progress id="calendarPressure" max="100" value="0"></progress>
+              </div>
+              <div class="system-row">
+                <span>Portfolio drift</span>
+                <progress id="portfolioDrift" max="100" value="0"></progress>
+              </div>
+              <div class="system-row">
+                <span>Roadmap clarity</span>
+                <progress id="roadmapClarity" max="100" value="0"></progress>
+              </div>
+            </div>
+            <div class="note-panel">
+              <strong>Finance module upgrades</strong>
+              <p>Connect a market data provider, add sector targets, create monthly cashflow goals, and track watchlist catalysts.</p>
+            </div>
+            <div class="note-panel">
+              <strong>Productivity module upgrades</strong>
+              <p>Add recurring tasks, ICS export, AI prioritization, habit streaks, and project lanes.</p>
+            </div>
+          </article>
+
+          <article class="panel admin-panel hidden" id="admin-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Admin Console</p>
+                <h2>User Requests</h2>
+              </div>
+              <button class="secondary-btn" id="logoutBtn">Logout</button>
+            </div>
+            <div class="admin-summary">
+              <div>
+                <span class="metric-label">Pending</span>
+                <strong id="pendingCount">0</strong>
+              </div>
+              <div>
+                <span class="metric-label">Approved Users</span>
+                <strong id="approvedCount">1</strong>
+              </div>
+            </div>
+            <div class="admin-request-list" id="adminRequests"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="../config.local.js"></script>
+    <script src="../app.js"></script>
+  </body>
+</html>
+
