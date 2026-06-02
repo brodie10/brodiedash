@@ -110,10 +110,11 @@ function bindElements() {
 
 function hydrateApiSettings() {
   const key = getOpenRouterKey();
-  els.keyModeLabel.textContent = key ? "Embedded" : "Missing";
-  els.aiLinkStatus.textContent = key ? "Embedded" : "Offline";
+  const serverApi = canUseServerApi() && !key;
+  els.keyModeLabel.textContent = serverApi ? "Server" : key ? "Local" : "Missing";
+  els.aiLinkStatus.textContent = serverApi ? "Server" : key ? "Local" : "Offline";
   setModelOptions(fallbackModels, localStorage.getItem(STORAGE_KEYS.model) || fallbackModels[0]);
-  if (key) {
+  if (serverApi || key) {
     fetchOpenRouterModels();
   }
 }
@@ -387,7 +388,8 @@ async function hashPassword(password, salt) {
 
 async function fetchOpenRouterModels() {
   const key = getOpenRouterKey();
-  if (!key) {
+  const serverApi = canUseServerApi() && !key;
+  if (!serverApi && !key) {
     setModelOptions(fallbackModels, localStorage.getItem(STORAGE_KEYS.model) || fallbackModels[0]);
     els.aiOutput.textContent = "Add your OpenRouter key to config.local.js.";
     els.modelSyncProgress.value = 32;
@@ -397,14 +399,17 @@ async function fetchOpenRouterModels() {
   els.aiLinkStatus.textContent = "Syncing";
   els.modelSyncProgress.value = 56;
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json"
-      }
-    });
+    const response = serverApi
+      ? await fetch("/api/openrouter-models")
+      : await fetch("https://openrouter.ai/api/v1/models", {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json"
+        }
+      });
     if (!response.ok) {
-      throw new Error(`Model sync failed: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`Model sync failed ${response.status}: ${errorText.slice(0, 180)}`);
     }
     const payload = await response.json();
     const models = (payload.data || [])
@@ -434,8 +439,9 @@ function setModelOptions(models, selectedModel) {
 
 async function runAiCommand() {
   const key = getOpenRouterKey();
+  const serverApi = canUseServerApi() && !key;
   const prompt = els.aiPrompt.value.trim();
-  if (!key) {
+  if (!serverApi && !key) {
     els.aiOutput.textContent = "Add your OpenRouter key to config.local.js.";
     return;
   }
@@ -460,20 +466,32 @@ async function runAiCommand() {
   ];
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": window.location.href,
-        "X-OpenRouter-Title": "BrodieDash"
-      },
-      body: JSON.stringify({
-        model: els.modelSelect.value,
-        messages,
-        temperature: 0.35
+    const response = serverApi
+      ? await fetch("/api/openrouter-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: els.modelSelect.value,
+          messages,
+          temperature: 0.35
+        })
       })
-    });
+      : await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": window.location.href,
+          "X-OpenRouter-Title": "BrodieDash"
+        },
+        body: JSON.stringify({
+          model: els.modelSelect.value,
+          messages,
+          temperature: 0.35
+        })
+      });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -607,6 +625,10 @@ function renderFinanceRecommendations(largestAllocation, pnlPct) {
 
 function getOpenRouterKey() {
   return HARDCODED_OPENROUTER_API_KEY.trim();
+}
+
+function canUseServerApi() {
+  return window.location.protocol === "http:" || window.location.protocol === "https:";
 }
 
 function financeColor(index) {

@@ -25,7 +25,15 @@ On a deployed domain, these map to paths such as `/ai/`, `/finance/`, and `/admi
 4. Run a dashboard-aware command.
 
 `config.local.js` is ignored by Git so the local key is not pushed to GitHub.
-For a deployed production version, move OpenRouter calls to a backend or serverless route and use environment variables.
+On Vercel, the included serverless routes use `OPENROUTER_API_KEY` instead.
+
+## Vercel
+
+Set this environment variable in Vercel:
+
+- `OPENROUTER_API_KEY`
+
+The deployed app uses the serverless routes in `api/` so the browser does not need `config.local.js`.
 
 The model dropdown is intentionally limited to GPT 5.5, Claude Opus 4.8, and Gemini 3.1 Pro.
 
