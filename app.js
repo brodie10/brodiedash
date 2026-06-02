@@ -23,11 +23,7 @@ const preferredModels = [
 const fallbackModels = preferredModels.map((model) => model.id);
 const modelLabels = Object.fromEntries(preferredModels.map((model) => [model.id, model.label]));
 
-const defaultPositions = [
-  { id: crypto.randomUUID(), symbol: "VOO", name: "S&P 500 Core", qty: 8, avg: 430, price: 486.3 },
-  { id: crypto.randomUUID(), symbol: "NVDA", name: "AI Compute", qty: 12, avg: 88, price: 112.4 },
-  { id: crypto.randomUUID(), symbol: "SGOV", name: "Treasury Cash", qty: 18, avg: 100.2, price: 100.7 }
-];
+const defaultPositions = [];
 
 const defaultTasks = [
   { id: crypto.randomUUID(), title: "Review dashboard architecture", date: toDateInput(new Date()), priority: "High", done: false },
@@ -72,8 +68,13 @@ const els = {};
 const authState = {
   currentUser: null
 };
+const cloudState = {
+  enabled: false,
+  users: null,
+  saveTimer: null
+};
 let state = {
-  positions: loadJson(STORAGE_KEYS.positions, defaultPositions),
+  positions: defaultPositions,
   tasks: loadJson(STORAGE_KEYS.tasks, defaultTasks),
   roadmap: loadJson(STORAGE_KEYS.roadmap, []),
   currentMonth: new Date(),
@@ -148,6 +149,7 @@ function bindEvents() {
   els.clearRoadmapBtn.addEventListener("click", () => {
     state.roadmap = [];
     persist(STORAGE_KEYS.roadmap, state.roadmap);
+    scheduleCloudDashboardSave();
     renderAll();
   });
 }
@@ -183,9 +185,21 @@ function getRouteHref(route) {
 }
 
 async function initializeAuth() {
+  const cloudSession = await fetchCloudAuthStatus();
+  if (cloudSession?.authenticated && cloudSession.user) {
+    cloudState.users = cloudSession.users || null;
+    await setAuthenticatedUser(cloudSession.user, { cloud: true });
+    return;
+  }
+
+  if (!canUseLocalFallback() && canUseServerApi()) {
+    lockDashboard();
+    return;
+  }
+
   const session = loadJson(STORAGE_KEYS.sessionUser, null);
   if (session && isKnownUser(session.username, session.role)) {
-    setAuthenticatedUser(session);
+    await setAuthenticatedUser(session);
     return;
   }
   lockDashboard();
@@ -208,8 +222,24 @@ async function handleLogin(event) {
   const username = normalizeUsername(els.loginUsername.value);
   const password = els.loginPassword.value;
 
+  const cloudLogin = await loginWithCloud(username, password);
+  if (cloudLogin.handled) {
+    if (cloudLogin.user) {
+      cloudState.users = cloudLogin.users || null;
+      await setAuthenticatedUser(cloudLogin.user, { cloud: true });
+      els.loginForm.reset();
+      return;
+    }
+    els.authMessage.textContent = cloudLogin.error;
+    return;
+  }
+  if (!canUseLocalFallback() && canUseServerApi()) {
+    els.authMessage.textContent = "Cloud login is unavailable. Check the Vercel database environment variables and redeploy.";
+    return;
+  }
+
   if (username === ADMIN_ACCOUNT.username && password === ADMIN_ACCOUNT.password) {
-    setAuthenticatedUser({ username: ADMIN_ACCOUNT.username, role: ADMIN_ACCOUNT.role });
+    await setAuthenticatedUser({ username: ADMIN_ACCOUNT.username, role: ADMIN_ACCOUNT.role });
     els.loginForm.reset();
     return;
   }
@@ -233,7 +263,7 @@ async function handleLogin(event) {
     return;
   }
 
-  setAuthenticatedUser({ username: user.username, role: "user" });
+  await setAuthenticatedUser({ username: user.username, role: "user" });
   els.loginForm.reset();
 }
 
@@ -248,6 +278,20 @@ async function handleSignup(event) {
   }
   if (username === ADMIN_ACCOUNT.username) {
     els.authMessage.textContent = "That username is reserved.";
+    return;
+  }
+
+  const cloudSignup = await signupWithCloud(username, password);
+  if (cloudSignup.handled) {
+    if (cloudSignup.ok) {
+      els.signupForm.reset();
+      switchAuthView("login");
+    }
+    els.authMessage.textContent = cloudSignup.message;
+    return;
+  }
+  if (!canUseLocalFallback() && canUseServerApi()) {
+    els.authMessage.textContent = "Cloud signup is unavailable. Check the Vercel database environment variables and redeploy.";
     return;
   }
 
@@ -275,23 +319,33 @@ async function handleSignup(event) {
   els.authMessage.textContent = "Request submitted. Brodie can approve it in the admin console.";
 }
 
-function setAuthenticatedUser(user) {
+async function setAuthenticatedUser(user, options = {}) {
   authState.currentUser = user;
+  state.positions = loadCurrentUserPositions();
   persist(STORAGE_KEYS.sessionUser, user);
   document.body.classList.remove("locked");
   els.currentUserLabel.textContent = user.username;
   renderAdminAccess();
+  renderAll();
+  if (options.cloud) {
+    await loadCloudDashboardState();
+    renderAll();
+  }
 }
 
 function lockDashboard() {
   authState.currentUser = null;
+  state.positions = [];
   localStorage.removeItem(STORAGE_KEYS.sessionUser);
   document.body.classList.add("locked");
   els.currentUserLabel.textContent = "Locked";
   renderAdminAccess();
 }
 
-function logout() {
+async function logout() {
+  if (cloudState.enabled) {
+    await logoutCloud();
+  }
   lockDashboard();
   switchAuthView("login");
   els.authMessage.textContent = "Logged out.";
@@ -307,7 +361,7 @@ function renderAdminAccess() {
 
 function renderAdminConsole() {
   if (!els.adminRequests) return;
-  const users = loadUsers().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const users = (cloudState.users || loadUsers()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const pending = users.filter((user) => user.status === "pending").length;
   const approved = users.filter((user) => user.status === "approved").length + 1;
   els.pendingCount.textContent = String(pending);
@@ -340,7 +394,13 @@ function renderAdminConsole() {
   });
 }
 
-function updateUserStatus(id, status) {
+async function updateUserStatus(id, status) {
+  const cloudUsers = await updateCloudUserStatus(id, status);
+  if (cloudUsers) {
+    renderAdminConsole();
+    return;
+  }
+
   const users = loadUsers().map((user) => {
     if (user.id !== id) return user;
     return { ...user, status, reviewedAt: new Date().toISOString(), reviewedBy: ADMIN_ACCOUNT.username };
@@ -356,6 +416,177 @@ function isKnownUser(username, role) {
 
 function loadUsers() {
   return loadJson(STORAGE_KEYS.users, []);
+}
+
+async function fetchCloudAuthStatus() {
+  if (!canUseServerApi()) return null;
+  try {
+    const response = await fetch("/api/auth", { credentials: "same-origin" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    cloudState.enabled = Boolean(payload.available);
+    cloudState.users = payload.users || cloudState.users;
+    return payload;
+  } catch (error) {
+    console.warn("BrodieDash cloud auth unavailable:", error.message);
+    cloudState.enabled = false;
+    return null;
+  }
+}
+
+async function loginWithCloud(username, password) {
+  if (!canUseServerApi()) return { handled: false };
+  try {
+    const response = await fetch("/api/auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "login", username, password })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (!cloudState.enabled && (response.status === 404 || response.status === 405 || response.status === 501 || response.status >= 500)) {
+        return { handled: false };
+      }
+      cloudState.enabled = true;
+      return { handled: true, error: payload.error || "Cloud login failed." };
+    }
+    cloudState.enabled = true;
+    return { handled: true, user: payload.user, users: payload.users || null };
+  } catch (error) {
+    console.warn("BrodieDash cloud login unavailable:", error.message);
+    return { handled: false };
+  }
+}
+
+async function signupWithCloud(username, password) {
+  if (!cloudState.enabled || !canUseServerApi()) return { handled: false };
+  try {
+    const response = await fetch("/api/auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "signup", username, password })
+    });
+    const payload = await response.json().catch(() => ({}));
+    return {
+      handled: true,
+      ok: response.ok,
+      message: payload.message || payload.error || "Signup request could not be submitted."
+    };
+  } catch (error) {
+    console.warn("BrodieDash cloud signup unavailable:", error.message);
+    return { handled: false };
+  }
+}
+
+async function logoutCloud() {
+  try {
+    await fetch("/api/auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" })
+    });
+  } catch (error) {
+    console.warn("BrodieDash cloud logout unavailable:", error.message);
+  }
+}
+
+async function updateCloudUserStatus(id, status) {
+  if (!cloudState.enabled || !canUseServerApi()) return null;
+  try {
+    const response = await fetch("/api/auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update-user", id, status })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Cloud user update failed.");
+    cloudState.users = payload.users || [];
+    return cloudState.users;
+  } catch (error) {
+    console.warn("BrodieDash cloud user update unavailable:", error.message);
+    return null;
+  }
+}
+
+function getCurrentUserFinanceKey() {
+  const username = authState.currentUser?.username ? normalizeUsername(authState.currentUser.username) : "locked";
+  return `${STORAGE_KEYS.positions}.${username}`;
+}
+
+function loadCurrentUserPositions() {
+  if (!authState.currentUser) return [];
+  return loadJson(getCurrentUserFinanceKey(), []);
+}
+
+function persistCurrentUserPositions(options = {}) {
+  if (!authState.currentUser) return;
+  persist(getCurrentUserFinanceKey(), state.positions);
+  if (!options.localOnly) scheduleCloudDashboardSave();
+}
+
+async function loadCloudDashboardState() {
+  if (!cloudState.enabled || !authState.currentUser || !canUseServerApi()) return;
+  try {
+    const response = await fetch("/api/dashboard-state", { credentials: "same-origin" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Cloud dashboard load failed.");
+    if (!payload.exists || !payload.payload) {
+      scheduleCloudDashboardSave({ immediate: true });
+      return;
+    }
+    applyCloudDashboardPayload(payload.payload);
+  } catch (error) {
+    console.warn("BrodieDash cloud dashboard unavailable:", error.message);
+  }
+}
+
+function applyCloudDashboardPayload(payload) {
+  if (Array.isArray(payload.positions)) {
+    state.positions = payload.positions;
+    persistCurrentUserPositions({ localOnly: true });
+  }
+  if (Array.isArray(payload.tasks)) {
+    state.tasks = payload.tasks;
+    persist(STORAGE_KEYS.tasks, state.tasks);
+  }
+  if (Array.isArray(payload.roadmap)) {
+    state.roadmap = payload.roadmap;
+    persist(STORAGE_KEYS.roadmap, state.roadmap);
+  }
+}
+
+function scheduleCloudDashboardSave(options = {}) {
+  if (!cloudState.enabled || !authState.currentUser || !canUseServerApi()) return;
+  window.clearTimeout(cloudState.saveTimer);
+  cloudState.saveTimer = window.setTimeout(saveCloudDashboardState, options.immediate ? 0 : 450);
+}
+
+async function saveCloudDashboardState() {
+  if (!cloudState.enabled || !authState.currentUser || !canUseServerApi()) return;
+  try {
+    const response = await fetch("/api/dashboard-state", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        payload: {
+          positions: state.positions,
+          tasks: state.tasks,
+          roadmap: state.roadmap
+        }
+      })
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "Cloud dashboard save failed.");
+    }
+  } catch (error) {
+    console.warn("BrodieDash cloud save unavailable:", error.message);
+  }
 }
 
 function normalizeUsername(value) {
@@ -452,54 +683,24 @@ async function runAiCommand() {
 
   els.runAiBtn.disabled = true;
   els.runAiBtn.textContent = "Running";
-  els.aiOutput.textContent = "Contacting OpenRouter...";
-
-  const messages = [
-    {
-      role: "system",
-      content: "You are the AI layer inside BrodieDash. Be concise, operational, and specific. Avoid pretending to have live financial data unless supplied in context."
-    },
-    {
-      role: "user",
-      content: els.includeContext.checked ? `${prompt}\n\nDashboard context:\n${buildDashboardContext()}` : prompt
-    }
-  ];
+  els.aiOutput.textContent = "Reading command...";
 
   try {
-    const response = serverApi
-      ? await fetch("/api/openrouter-chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: els.modelSelect.value,
-          messages,
-          temperature: 0.35
-        })
-      })
-      : await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.href,
-          "X-OpenRouter-Title": "BrodieDash"
-        },
-        body: JSON.stringify({
-          model: els.modelSelect.value,
-          messages,
-          temperature: 0.35
-        })
-      });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OpenRouter error ${response.status}: ${errorText.slice(0, 240)}`);
-    }
-
-    const payload = await response.json();
-    els.aiOutput.textContent = payload.choices?.[0]?.message?.content || "No response content returned.";
+    const financeUpdate = await maybeApplyFinanceUpdate(prompt, key, serverApi);
+    els.aiOutput.textContent = "Contacting OpenRouter...";
+    const messages = [
+      {
+        role: "system",
+        content: "You are the AI layer inside BrodieDash. Be concise, operational, and specific. Avoid pretending to have live financial data unless supplied in context."
+      },
+      {
+        role: "user",
+        content: els.includeContext.checked ? `${prompt}\n\nDashboard context:\n${buildDashboardContext()}` : prompt
+      }
+    ];
+    const payload = await sendOpenRouterChat({ key, serverApi, messages, temperature: 0.35 });
+    const answer = payload.choices?.[0]?.message?.content || "No response content returned.";
+    els.aiOutput.textContent = financeUpdate ? `${financeUpdate}\n\n${answer}` : answer;
   } catch (error) {
     els.aiOutput.textContent = error.message;
   } finally {
@@ -508,7 +709,172 @@ async function runAiCommand() {
   }
 }
 
+async function sendOpenRouterChat({ key, serverApi, messages, temperature = 0.35 }) {
+  const response = serverApi
+    ? await fetch("/api/openrouter-chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: els.modelSelect.value,
+        messages,
+        temperature
+      })
+    })
+    : await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": window.location.href,
+        "X-OpenRouter-Title": "BrodieDash"
+      },
+      body: JSON.stringify({
+        model: els.modelSelect.value,
+        messages,
+        temperature
+      })
+    });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenRouter error ${response.status}: ${errorText.slice(0, 240)}`);
+  }
+
+  return response.json();
+}
+
+async function maybeApplyFinanceUpdate(prompt, key, serverApi) {
+  if (!authState.currentUser || !shouldAttemptFinanceExtraction(prompt)) return "";
+  els.aiOutput.textContent = "Updating finance profile...";
+  try {
+    const payload = await sendOpenRouterChat({
+      key,
+      serverApi,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "Extract investment positions for BrodieDash from the user's command.",
+            "Return only JSON with this shape:",
+            '{"mode":"none|upsert|replace|clear","positions":[{"symbol":"AAPL","name":"Apple","qty":10,"avg":150,"price":175}],"notes":[]}',
+            "Use mode clear only when the user asks to clear/reset/delete all finance positions.",
+            "Use mode replace when the user says this is the full/new portfolio.",
+            "Use mode upsert when the user adds or updates holdings.",
+            "Do not invent live prices. If only current value is supplied, use qty 1 and avg/price equal to that value.",
+            "If the prompt is not about the user's own holdings, return mode none with an empty positions array."
+          ].join(" ")
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    });
+    const content = payload.choices?.[0]?.message?.content || "";
+    return applyFinanceExtraction(parseAiJson(content));
+  } catch (error) {
+    return `Finance update skipped: ${error.message}`;
+  }
+}
+
+function shouldAttemptFinanceExtraction(prompt) {
+  return /\b(portfolio|invest|investment|investments|stock|stocks|shares|share|etf|fund|crypto|holding|holdings|position|positions|bought|buy|own|ticker|avg|average|cost basis|allocation|finance|finances)\b/i.test(prompt);
+}
+
+function parseAiJson(content) {
+  const text = String(content).trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("AI did not return finance JSON.");
+    return JSON.parse(match[0]);
+  }
+}
+
+function applyFinanceExtraction(extraction) {
+  const mode = String(extraction?.mode || "none").toLowerCase();
+  if (mode === "none") return "";
+
+  if (mode === "clear") {
+    state.positions = [];
+    persistCurrentUserPositions();
+    renderAll();
+    return "Finance tab updated: cleared personal positions.";
+  }
+
+  const positions = Array.isArray(extraction?.positions)
+    ? extraction.positions.map(normalizeExtractedPosition).filter(Boolean)
+    : [];
+  if (!positions.length) return "Finance update skipped: no complete positions were found.";
+
+  if (mode === "replace") {
+    state.positions = positions.map((position) => ({ ...position, id: crypto.randomUUID() }));
+  } else {
+    const next = [...state.positions];
+    positions.forEach((position) => {
+      const index = next.findIndex((item) => item.symbol === position.symbol);
+      if (index >= 0) {
+        next[index] = { ...next[index], ...position, id: next[index].id };
+      } else {
+        next.push({ ...position, id: crypto.randomUUID() });
+      }
+    });
+    state.positions = next;
+  }
+
+  persistCurrentUserPositions();
+  renderAll();
+  return `Finance tab updated: ${positions.map((position) => position.symbol).join(", ")}.`;
+}
+
+function normalizeExtractedPosition(raw) {
+  const symbol = String(raw?.symbol || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9.-]/g, "")
+    .slice(0, 12);
+  if (!symbol) return null;
+
+  const value = readPositiveNumber(raw?.value ?? raw?.currentValue ?? raw?.amount);
+  let qty = readPositiveNumber(raw?.qty ?? raw?.quantity ?? raw?.shares ?? raw?.units);
+  let avg = readNonNegativeNumber(raw?.avg ?? raw?.averageCost ?? raw?.costBasis ?? raw?.cost);
+  let price = readNonNegativeNumber(raw?.price ?? raw?.currentPrice ?? raw?.marketPrice);
+
+  if (qty === null && value !== null) {
+    qty = 1;
+    avg = avg ?? value;
+    price = price ?? value;
+  }
+  if (qty === null) return null;
+  if (price === null && avg !== null) price = avg;
+  if (avg === null && price !== null) avg = price;
+  if (avg === null || price === null) return null;
+
+  return {
+    symbol,
+    name: String(raw?.name || symbol).trim().slice(0, 64) || symbol,
+    qty,
+    avg,
+    price
+  };
+}
+
+function readPositiveNumber(value) {
+  const number = Number(String(value ?? "").replace(/[$,]/g, ""));
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function readNonNegativeNumber(value) {
+  const number = Number(String(value ?? "").replace(/[$,]/g, ""));
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 function renderFinance() {
+  const hasPositions = state.positions.length > 0;
   const total = state.positions.reduce((sum, item) => sum + item.qty * item.price, 0);
   const cost = state.positions.reduce((sum, item) => sum + item.qty * item.avg, 0);
   const pnl = total - cost;
@@ -525,32 +891,40 @@ function renderFinance() {
   const largestAllocation = largest ? largest.allocation : 0;
   const cashLike = positionStats.filter((item) => /^(CASH|SGOV|BIL|TBIL|USFR|VMFXX)$/i.test(item.symbol));
   const cashValue = cashLike.reduce((sum, item) => sum + item.value, 0);
-  const diversification = Math.max(0, Math.min(100, Math.round(100 - largestAllocation + Math.min(positionStats.length, 8) * 3)));
-  const healthLabel = largestAllocation > 45 ? "Tight" : largestAllocation > 28 ? "Stable" : "Wide";
+  const diversification = hasPositions
+    ? Math.max(0, Math.min(100, Math.round(100 - largestAllocation + Math.min(positionStats.length, 8) * 3)))
+    : 0;
+  const healthLabel = !hasPositions ? "--" : largestAllocation > 45 ? "Tight" : largestAllocation > 28 ? "Stable" : "Wide";
+  const financeModeChip = document.querySelector(".position-toolbar .chip");
+  if (financeModeChip) {
+    financeModeChip.textContent = authState.currentUser ? `${authState.currentUser.username} ledger` : "Personal ledger";
+  }
 
   els.totalValue.textContent = formatCurrency(total);
   els.portfolioValue.textContent = formatCurrency(total);
   els.unrealizedPnL.textContent = `${formatCurrency(pnl)} (${pnlPct.toFixed(1)}%)`;
   els.unrealizedPnL.className = pnl >= 0 ? "gain" : "loss";
-  els.pnlPill.textContent = `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} / ${pnlPct.toFixed(1)}%`;
+  els.pnlPill.textContent = hasPositions ? `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} / ${pnlPct.toFixed(1)}%` : "$0";
   els.pnlPill.className = `finance-pill ${pnl >= 0 ? "gain-pill" : "loss-pill"}`;
-  els.portfolioDelta.textContent = pnl >= 0 ? `${pnlPct.toFixed(1)}% unrealized gain` : `${Math.abs(pnlPct).toFixed(1)}% unrealized drawdown`;
+  els.portfolioDelta.textContent = !hasPositions
+    ? "No personal positions"
+    : pnl >= 0 ? `${pnlPct.toFixed(1)}% unrealized gain` : `${Math.abs(pnlPct).toFixed(1)}% unrealized drawdown`;
   els.portfolioDelta.className = pnl >= 0 ? "gain" : "loss";
-  els.riskTilt.textContent = largestAllocation > 45 ? "Concentrated" : largestAllocation > 28 ? "Moderate" : "Balanced";
+  els.riskTilt.textContent = !hasPositions ? "Empty" : largestAllocation > 45 ? "Concentrated" : largestAllocation > 28 ? "Moderate" : "Balanced";
   els.riskTilt.className = "finance-pill";
   els.cashReserve.textContent = formatCurrency(cashValue);
   els.diversificationScore.textContent = `${diversification}%`;
   els.financeHealth.textContent = healthLabel;
   els.largestPosition.textContent = largest
     ? `${largest.symbol} leads at ${largest.allocation.toFixed(1)}% of the portfolio.`
-    : "Largest allocation unavailable";
+    : "No personal positions loaded.";
   els.allocationSummary.textContent = largest
     ? `${positionStats.length} assets / ${largest.symbol} largest`
     : "No assets";
   els.positionSummary.textContent = `${positionStats.length} tracked asset${positionStats.length === 1 ? "" : "s"}`;
   els.allocationRing.style.background = buildAllocationGradient(positionStats);
 
-  els.allocationBars.innerHTML = positionStats.map((item) => `
+  els.allocationBars.innerHTML = hasPositions ? positionStats.map((item) => `
     <div class="allocation-bar">
       <div>
         <strong>${escapeHtml(item.symbol)}</strong>
@@ -558,9 +932,9 @@ function renderFinance() {
       </div>
       <span class="allocation-track"><span style="width: ${item.allocation.toFixed(1)}%; background: ${item.color};"></span></span>
     </div>
-  `).join("");
+  `).join("") : `<div class="empty-state">No personal allocation data.</div>`;
 
-  els.positionsBody.innerHTML = positionStats.map((item) => {
+  els.positionsBody.innerHTML = hasPositions ? positionStats.map((item) => {
     return `
       <article class="position-card">
         <div class="position-main">
@@ -582,36 +956,45 @@ function renderFinance() {
         </div>
         <button class="delete-btn" data-delete-position="${item.id}" aria-label="Delete ${escapeHtml(item.symbol)}">X</button>
       </article>`;
-  }).join("");
+  }).join("") : `<div class="empty-state">No positions saved for ${escapeHtml(authState.currentUser?.username || "this user")}.</div>`;
 
   document.querySelectorAll("[data-delete-position]").forEach((button) => {
     button.addEventListener("click", () => {
       state.positions = state.positions.filter((item) => item.id !== button.dataset.deletePosition);
-      persist(STORAGE_KEYS.positions, state.positions);
+      persistCurrentUserPositions();
       renderAll();
     });
   });
 
-  renderFinanceRecommendations(largestAllocation, pnlPct);
+  renderFinanceRecommendations(positionStats, largestAllocation, pnlPct, cashValue, total);
 }
 
-function renderFinanceRecommendations(largestAllocation, pnlPct) {
+function renderFinanceRecommendations(positionStats, largestAllocation, pnlPct, cashValue, total) {
+  if (!positionStats.length) {
+    els.financeRecommendations.innerHTML = `<div class="empty-state">No personal capital intelligence yet.</div>`;
+    return;
+  }
+
+  const largest = positionStats.reduce((top, item) => item.value > (top?.value || 0) ? item : top, null);
+  const cashPct = total ? (cashValue / total) * 100 : 0;
   const recs = [
     {
-      title: "Live quote layer",
-      body: "Start with Finnhub or Twelve Data for quick quotes, then move to Polygon if you want deeper market data and better reliability."
-    },
-    {
-      title: largestAllocation > 45 ? "Concentration watch" : "Allocation autopilot",
+      title: largestAllocation > 45 ? "Concentration watch" : "Top allocation",
       body: largestAllocation > 45
-        ? "Your largest position is above 45%; add target allocations and rebalance alerts before connecting live trading decisions."
-        : "Add target weights, drift alerts, and a rebalance checklist so this panel can become a real decision surface."
+        ? `${largest.symbol} is ${largest.allocation.toFixed(1)}% of this profile; review whether that matches the user's risk target.`
+        : `${largest.symbol} leads at ${largest.allocation.toFixed(1)}%, with ${positionStats.length} tracked position${positionStats.length === 1 ? "" : "s"}.`
     },
     {
-      title: pnlPct < -8 ? "Drawdown protocol" : "Scenario simulator",
-      body: pnlPct < -8
-        ? "Create a rules-based drawdown checklist so decisions stay consistent during volatility."
-        : "Model rate changes, AI sector exposure, monthly contributions, and cash reserve targets from the same position data."
+      title: cashPct < 5 ? "Cash reserve low" : "Cash reserve",
+      body: cashPct < 5
+        ? `Cash-like holdings are ${cashPct.toFixed(1)}% of the portfolio.`
+        : `Cash-like holdings are ${cashPct.toFixed(1)}% of the portfolio.`
+    },
+    {
+      title: pnlPct < 0 ? "Drawdown status" : "Profit status",
+      body: pnlPct < 0
+        ? `Tracked cost basis shows a ${Math.abs(pnlPct).toFixed(1)}% unrealized drawdown.`
+        : `Tracked cost basis shows a ${pnlPct.toFixed(1)}% unrealized gain.`
     }
   ];
 
@@ -629,6 +1012,13 @@ function getOpenRouterKey() {
 
 function canUseServerApi() {
   return window.location.protocol === "http:" || window.location.protocol === "https:";
+}
+
+function canUseLocalFallback() {
+  return window.location.protocol === "file:"
+    || window.location.hostname === "localhost"
+    || window.location.hostname === "127.0.0.1"
+    || window.location.hostname === "::1";
 }
 
 function financeColor(index) {
@@ -670,7 +1060,7 @@ function addPosition(event) {
     avg: Number(data.get("avg")),
     price: Number(data.get("price"))
   });
-  persist(STORAGE_KEYS.positions, state.positions);
+  persistCurrentUserPositions();
   event.currentTarget.reset();
   renderAll();
 }
@@ -680,7 +1070,7 @@ function simulatePriceTick() {
     const movement = 1 + (Math.random() - 0.47) * 0.065;
     return { ...position, price: Math.max(0.01, Number((position.price * movement).toFixed(2))) };
   });
-  persist(STORAGE_KEYS.positions, state.positions);
+  persistCurrentUserPositions();
   renderAll();
 }
 
@@ -748,6 +1138,7 @@ function renderTasks() {
     checkbox.addEventListener("change", () => {
       state.tasks = state.tasks.map((task) => task.id === checkbox.dataset.toggleTask ? { ...task, done: checkbox.checked } : task);
       persist(STORAGE_KEYS.tasks, state.tasks);
+      scheduleCloudDashboardSave();
       renderAll();
     });
   });
@@ -756,6 +1147,7 @@ function renderTasks() {
     button.addEventListener("click", () => {
       state.tasks = state.tasks.filter((task) => task.id !== button.dataset.deleteTask);
       persist(STORAGE_KEYS.tasks, state.tasks);
+      scheduleCloudDashboardSave();
       renderAll();
     });
   });
@@ -773,6 +1165,7 @@ function addTask(event) {
   });
   state.selectedDate = String(data.get("date"));
   persist(STORAGE_KEYS.tasks, state.tasks);
+  scheduleCloudDashboardSave();
   event.currentTarget.reset();
   event.currentTarget.elements.date.value = state.selectedDate;
   renderAll();
@@ -800,6 +1193,7 @@ function renderFeatures() {
         ? state.roadmap.filter((item) => item !== title)
         : [...state.roadmap, title];
       persist(STORAGE_KEYS.roadmap, state.roadmap);
+      scheduleCloudDashboardSave();
       renderAll();
     });
   });
@@ -831,10 +1225,13 @@ function changeMonth(offset) {
 }
 
 function buildDashboardContext() {
-  const positions = state.positions.map((item) => `${item.symbol}: qty ${item.qty}, avg ${item.avg}, price ${item.price}`).join("\n");
+  const username = authState.currentUser?.username || "Locked";
+  const positions = state.positions.length
+    ? state.positions.map((item) => `${item.symbol}: qty ${item.qty}, avg ${item.avg}, price ${item.price}`).join("\n")
+    : "No personal positions saved";
   const tasks = state.tasks.map((task) => `${task.date} | ${task.priority} | ${task.done ? "done" : "open"} | ${task.title}`).join("\n");
   const roadmap = state.roadmap.length ? state.roadmap.join(", ") : "No pinned modules";
-  return `Positions:\n${positions}\n\nTasks:\n${tasks}\n\nPinned roadmap modules:\n${roadmap}`;
+  return `Current user: ${username}\n\nPositions:\n${positions}\n\nTasks:\n${tasks}\n\nPinned roadmap modules:\n${roadmap}`;
 }
 
 function startClock() {

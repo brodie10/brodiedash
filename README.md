@@ -37,12 +37,37 @@ The deployed app uses the serverless routes in `api/` so the browser does not ne
 
 The model dropdown is intentionally limited to GPT 5.5, Claude Opus 4.8, and Gemini 3.1 Pro.
 
+## Vercel Database
+
+The Vercel Postgres/Neon database is used through serverless API routes, not directly from browser JavaScript.
+After connecting the database to the Vercel project, confirm that Vercel added one of these environment variables:
+
+- `POSTGRES_URL`
+- `DATABASE_URL`
+- `POSTGRES_PRISMA_URL`
+- `POSTGRES_URL_NON_POOLING`
+
+Recommended additional Vercel environment variables:
+
+- `BRODIEDASH_SESSION_SECRET` - any long random string for signing login cookies.
+- `BRODIEDASH_ADMIN_USERNAME` - optional, defaults to `brodiebulman`.
+- `BRODIEDASH_ADMIN_PASSWORD` - recommended; otherwise the prototype password remains active.
+
+The first successful API call creates these tables automatically:
+
+- `brodiedash_users`
+- `brodiedash_dashboard_state`
+
+When the database routes are available, BrodieDash syncs login requests, admin approvals, positions, tasks, and roadmap pins to Vercel Postgres. If the API is unavailable locally, the app falls back to browser `localStorage`.
+
 ## Accounts
 
 - Admin login: `brodiebulman` / `Brodie14!$`
 - New users can request access with a username and password.
 - Pending requests appear in the admin console for approval or denial.
-- This is a static local prototype, so requests and approvals are stored in browser `localStorage`.
+- Local file usage still stores requests and approvals in browser `localStorage`; Vercel deployments use the database routes when configured.
+- Finance positions are scoped per approved username in browser `localStorage`.
+- The AI command layer can extract investment holdings from a user's prompt and update that user's finance tab.
 
 ## Next Build Options
 
