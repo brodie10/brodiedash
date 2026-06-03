@@ -1,6 +1,6 @@
 # BrodieDash
 
-A self-contained futuristic dashboard prototype with OpenRouter AI, finance tracking, a calendar-style task board, and a feature roadmap.
+A self-contained futuristic dashboard prototype with OpenRouter AI, user management, and a calendar-style task board.
 
 ## Run - Please
 
@@ -9,13 +9,10 @@ Open `index.html` in a browser.
 Static route pages are available at:
 
 - `ai/index.html`
-- `finance/index.html`
 - `calendar/index.html`
-- `roadmap/index.html`
-- `systems/index.html`
 - `admin/index.html`
 
-On a deployed domain, these map to paths such as `/ai/`, `/finance/`, and `/admin/`.
+On a deployed domain, these map to paths such as `/ai/`, `/calendar/`, and `/admin/`.
 
 ## OpenRouter
 
@@ -58,7 +55,7 @@ The first successful API call creates these tables automatically:
 - `brodiedash_users`
 - `brodiedash_dashboard_state`
 
-When the database routes are available, BrodieDash syncs login requests, admin approvals, positions, tasks, and roadmap pins to Vercel Postgres. If the API is unavailable locally, the app falls back to browser `localStorage`.
+When the database routes are available, BrodieDash syncs login requests, admin approvals, and tasks to Vercel Postgres. If the API is unavailable locally, the app falls back to browser `localStorage`.
 
 ## Accounts
 
@@ -67,12 +64,9 @@ When the database routes are available, BrodieDash syncs login requests, admin a
 - Pending requests appear in the admin console for approval or denial.
 - Admins can manage each user's display name, app role, profile notes, last-login metadata, and module permissions.
 - Local file usage still stores requests and approvals in browser `localStorage`; Vercel deployments use the database routes when configured.
-- Finance positions are scoped per approved username in browser `localStorage`.
-- The AI command layer can extract investment holdings from a user's prompt and update that user's finance tab.
 
 ## Next Build Options
 
 - Add a backend proxy so the OpenRouter key is never exposed in browser storage.
-- Connect live finance data through Polygon, Finnhub, Alpha Vantage, Twelve Data, or another quote provider.
 - Add recurring calendar tasks, ICS export, drag scheduling, and AI prioritization.
 - Add user profiles, authentication, cloud sync, and encrypted storage.

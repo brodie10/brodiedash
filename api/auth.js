@@ -6,8 +6,8 @@ const DEFAULT_ADMIN = {
   username: "brodiebulman",
   password: "Brodie14!$"
 };
-const ALL_MODULE_PERMISSIONS = ["ai", "finance", "calendar", "roadmap", "systems", "admin"];
-const DEFAULT_MODULE_PERMISSIONS = ["ai", "finance", "calendar", "roadmap", "systems"];
+const ALL_MODULE_PERMISSIONS = ["ai", "calendar", "admin"];
+const DEFAULT_MODULE_PERMISSIONS = ["ai", "calendar"];
 
 module.exports = async function handler(req, res) {
   try {

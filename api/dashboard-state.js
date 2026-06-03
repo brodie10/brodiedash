@@ -57,9 +57,7 @@ async function handlePut(req, res, username) {
 
 function normalizePayload(payload) {
   return {
-    positions: Array.isArray(payload?.positions) ? payload.positions : [],
-    tasks: Array.isArray(payload?.tasks) ? payload.tasks : [],
-    roadmap: Array.isArray(payload?.roadmap) ? payload.roadmap : []
+    tasks: Array.isArray(payload?.tasks) ? payload.tasks : []
   };
 }
 

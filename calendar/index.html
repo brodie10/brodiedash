@@ -47,10 +47,7 @@
       <aside class="rail" aria-label="Dashboard sections">
         <div class="brand-mark" aria-label="BrodieDash">BD</div>
         <a class="rail-btn" data-route-link="ai" href="ai/index.html" aria-label="AI command">AI</a>
-        <a class="rail-btn" data-route-link="finance" href="finance/index.html" aria-label="Finance">FX</a>
         <a class="rail-btn" data-route-link="calendar" href="calendar/index.html" aria-label="Calendar">CAL</a>
-        <a class="rail-btn" data-route-link="roadmap" href="roadmap/index.html" aria-label="Roadmap">MAP</a>
-        <a class="rail-btn" data-route-link="systems" href="systems/index.html" aria-label="Systems">SYS</a>
         <a class="rail-btn admin-nav hidden" data-route-link="admin" href="admin/index.html" aria-label="Admin">ADM</a>
       </aside>
 
@@ -103,9 +100,9 @@
             </div>
 
             <div class="quick-actions" aria-label="Prompt presets">
-              <button data-prompt="Summarize my finance risk, tasks, and next best actions in a concise mission brief.">Mission Brief</button>
+              <button data-prompt="Summarize my current tasks and next best actions in a concise mission brief.">Mission Brief</button>
               <button data-prompt="Create three ambitious dashboard feature ideas that would make this command center more useful.">Feature Ideas</button>
-              <button data-prompt="Draft a practical weekly plan from my current task list and finance snapshot.">Weekly Plan</button>
+              <button data-prompt="Draft a practical weekly plan from my current task list.">Weekly Plan</button>
             </div>
 
             <label class="field prompt-field">
@@ -131,19 +128,9 @@
             </div>
             <div class="pulse-grid">
               <div class="pulse-cell">
-                <span>Portfolio</span>
-                <strong id="portfolioValue">$0</strong>
-                <small id="portfolioDelta">No positions</small>
-              </div>
-              <div class="pulse-cell">
                 <span>Tasks</span>
                 <strong id="taskCount">0</strong>
                 <small id="taskDelta">Clear runway</small>
-              </div>
-              <div class="pulse-cell">
-                <span>Roadmap</span>
-                <strong id="roadmapCount">0</strong>
-                <small>pinned upgrades</small>
               </div>
               <div class="pulse-cell">
                 <span>Automation</span>
@@ -158,88 +145,6 @@
         </section>
 
         <section class="content-grid">
-          <article class="panel finance-panel" id="finance-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Capital Console</p>
-                <h2>Finance Overview</h2>
-              </div>
-              <div class="finance-actions">
-                <button class="secondary-btn" id="simulatePricesBtn">Simulate Tick</button>
-              </div>
-            </div>
-
-            <div class="finance-console">
-              <section class="finance-hero" aria-label="Portfolio headline">
-                <div class="finance-hero-copy">
-                  <span class="metric-label">Portfolio Value</span>
-                  <strong id="totalValue">$0</strong>
-                  <div class="finance-status-row">
-                    <span id="pnlPill" class="finance-pill">$0</span>
-                    <span id="riskTilt" class="finance-pill">Balanced</span>
-                  </div>
-                  <p id="largestPosition">Largest allocation unavailable</p>
-                </div>
-                <div class="allocation-stage">
-                  <div class="allocation-ring" id="allocationRing">
-                    <span>Allocation</span>
-                    <strong id="financeHealth">--</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section class="finance-summary" aria-label="Portfolio metrics">
-                <div>
-                  <span>Unrealized P/L</span>
-                  <strong id="unrealizedPnL">$0</strong>
-                </div>
-                <div>
-                  <span>Cash Reserve</span>
-                  <strong id="cashReserve">$0</strong>
-                </div>
-                <div>
-                  <span>Diversification</span>
-                  <strong id="diversificationScore">0%</strong>
-                </div>
-              </section>
-
-              <section class="allocation-panel" aria-label="Allocation breakdown">
-                <div class="section-kicker">
-                  <span>Allocation Map</span>
-                  <strong id="allocationSummary">No assets</strong>
-                </div>
-                <div class="allocation-bars" id="allocationBars"></div>
-              </section>
-
-              <div class="position-toolbar">
-                <div>
-                  <span class="metric-label">Positions</span>
-                  <strong id="positionSummary">0 tracked assets</strong>
-                </div>
-                <span class="chip">Manual prices</span>
-              </div>
-
-              <div class="position-stack" id="positionsBody"></div>
-
-              <form class="position-form" id="positionForm">
-                <input name="symbol" maxlength="8" placeholder="Ticker" required>
-                <input name="name" placeholder="Name" required>
-                <input name="qty" type="number" min="0" step="0.01" placeholder="Qty" required>
-                <input name="avg" type="number" min="0" step="0.01" placeholder="Avg" required>
-                <input name="price" type="number" min="0" step="0.01" placeholder="Price" required>
-                <button class="primary-btn" type="submit">Add</button>
-              </form>
-
-              <section class="finance-intel" aria-label="Finance recommendations">
-                <div class="section-kicker">
-                  <span>Capital Intelligence</span>
-                  <strong>Recommended Upgrades</strong>
-                </div>
-                <div class="recommendation-strip" id="financeRecommendations"></div>
-              </section>
-            </div>
-          </article>
-
           <article class="panel calendar-panel" id="calendar-panel">
             <div class="panel-heading">
               <div>
@@ -265,53 +170,6 @@
             </form>
             <div class="task-list" id="taskList"></div>
           </article>
-
-          <article class="panel features-panel" id="features-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Expansion Matrix</p>
-                <h2>Recommended Modules</h2>
-              </div>
-              <button class="secondary-btn" id="clearRoadmapBtn">Clear Pins</button>
-            </div>
-            <div class="feature-list" id="featureList"></div>
-          </article>
-
-          <article class="panel systems-panel" id="systems-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Systems</p>
-                <h2>Command Metrics</h2>
-              </div>
-            </div>
-            <div class="system-stack">
-              <div class="system-row">
-                <span>OpenRouter model sync</span>
-                <progress id="modelSyncProgress" max="100" value="32"></progress>
-              </div>
-              <div class="system-row">
-                <span>Calendar pressure</span>
-                <progress id="calendarPressure" max="100" value="0"></progress>
-              </div>
-              <div class="system-row">
-                <span>Portfolio drift</span>
-                <progress id="portfolioDrift" max="100" value="0"></progress>
-              </div>
-              <div class="system-row">
-                <span>Roadmap clarity</span>
-                <progress id="roadmapClarity" max="100" value="0"></progress>
-              </div>
-            </div>
-            <div class="note-panel">
-              <strong>Finance module upgrades</strong>
-              <p>Connect a market data provider, add sector targets, create monthly cashflow goals, and track watchlist catalysts.</p>
-            </div>
-            <div class="note-panel">
-              <strong>Productivity module upgrades</strong>
-              <p>Add recurring tasks, ICS export, AI prioritization, habit streaks, and project lanes.</p>
-            </div>
-          </article>
-
           <article class="panel admin-panel hidden" id="admin-panel">
             <div class="panel-heading">
               <div>

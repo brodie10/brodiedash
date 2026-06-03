@@ -1,8 +1,6 @@
 const STORAGE_KEYS = {
   model: "brodiedash.openrouter.model",
-  positions: "brodiedash.positions",
   tasks: "brodiedash.tasks",
-  roadmap: "brodiedash.roadmap",
   users: "brodiedash.users",
   sessionUser: "brodiedash.session.user"
 };
@@ -24,53 +22,15 @@ const fallbackModels = preferredModels.map((model) => model.id);
 const modelLabels = Object.fromEntries(preferredModels.map((model) => [model.id, model.label]));
 const modulePermissions = [
   { id: "ai", label: "AI" },
-  { id: "finance", label: "Finance" },
   { id: "calendar", label: "Calendar" },
-  { id: "roadmap", label: "Roadmap" },
-  { id: "systems", label: "Systems" },
   { id: "admin", label: "Admin" }
 ];
-const defaultModulePermissions = ["ai", "finance", "calendar", "roadmap", "systems"];
-
-const defaultPositions = [];
+const defaultModulePermissions = ["ai", "calendar"];
 
 const defaultTasks = [
   { id: crypto.randomUUID(), title: "Review dashboard architecture", date: toDateInput(new Date()), priority: "High", done: false },
   { id: crypto.randomUUID(), title: "Add OpenRouter key", date: toDateInput(addDays(new Date(), 1)), priority: "Medium", done: false },
-  { id: crypto.randomUUID(), title: "Plan finance data provider", date: toDateInput(addDays(new Date(), 3)), priority: "Low", done: false }
-];
-
-const recommendedModules = [
-  {
-    title: "Market Data Connector",
-    description: "Wire a quote API such as Polygon, Finnhub, Alpha Vantage, or Twelve Data for live prices, sectors, and alerts.",
-    tags: ["Finance", "API", "High impact"]
-  },
-  {
-    title: "AI Portfolio Analyst",
-    description: "Let OpenRouter summarize allocation, concentration, downside scenarios, and watchlist catalysts from your saved positions.",
-    tags: ["AI", "Finance", "Risk"]
-  },
-  {
-    title: "Recurring Calendar Engine",
-    description: "Add recurring tasks, drag scheduling, streaks, agenda lanes, and export to an ICS calendar file.",
-    tags: ["Calendar", "Productivity"]
-  },
-  {
-    title: "Personal CRM",
-    description: "Track people, follow-ups, notes, birthdays, and relationship history from one command surface.",
-    tags: ["CRM", "Network"]
-  },
-  {
-    title: "Knowledge Vault",
-    description: "Store notes, documents, links, and AI summaries with semantic search across your personal context.",
-    tags: ["Search", "Notes", "AI"]
-  },
-  {
-    title: "Automation Hub",
-    description: "Connect GitHub, email, weather, reminders, and webhook actions to turn the dashboard into an operating layer.",
-    tags: ["Automation", "Integrations"]
-  }
+  { id: crypto.randomUUID(), title: "Plan dashboard database sync", date: toDateInput(addDays(new Date(), 3)), priority: "Low", done: false }
 ];
 
 const els = {};
@@ -83,9 +43,7 @@ const cloudState = {
   saveTimer: null
 };
 let state = {
-  positions: defaultPositions,
   tasks: loadJson(STORAGE_KEYS.tasks, defaultTasks),
-  roadmap: loadJson(STORAGE_KEYS.roadmap, []),
   currentMonth: new Date(),
   selectedDate: toDateInput(new Date())
 };
@@ -105,13 +63,8 @@ function bindElements() {
     "authScreen", "loginForm", "signupForm", "loginUsername", "loginPassword", "signupUsername",
     "signupPassword", "authMessage", "clock", "aiLinkStatus", "focusLoad", "currentUserLabel",
     "topLogoutBtn", "refreshModelsBtn", "modelSelect", "keyModeLabel", "aiPrompt", "includeContext",
-    "runAiBtn", "aiOutput", "portfolioValue", "portfolioDelta", "taskCount",
-    "taskDelta", "roadmapCount", "automationScore", "totalValue", "unrealizedPnL", "riskTilt", "pnlPill",
-    "largestPosition", "allocationRing", "financeHealth", "cashReserve", "diversificationScore",
-    "allocationSummary", "allocationBars", "positionSummary", "positionForm", "positionsBody",
-    "financeRecommendations", "simulatePricesBtn", "monthLabel", "calendarGrid",
-    "prevMonthBtn", "nextMonthBtn", "taskForm", "taskList", "featureList", "clearRoadmapBtn",
-    "modelSyncProgress", "calendarPressure", "portfolioDrift", "roadmapClarity", "logoutBtn",
+    "runAiBtn", "aiOutput", "taskCount", "taskDelta", "automationScore",
+    "monthLabel", "calendarGrid", "prevMonthBtn", "nextMonthBtn", "taskForm", "taskList", "logoutBtn",
     "pendingCount", "approvedCount", "adminRequests"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
@@ -150,27 +103,16 @@ function bindEvents() {
     });
   });
 
-  els.positionForm.addEventListener("submit", addPosition);
-  els.simulatePricesBtn.addEventListener("click", simulatePriceTick);
   els.prevMonthBtn.addEventListener("click", () => changeMonth(-1));
   els.nextMonthBtn.addEventListener("click", () => changeMonth(1));
   els.taskForm.addEventListener("submit", addTask);
-  els.clearRoadmapBtn.addEventListener("click", () => {
-    state.roadmap = [];
-    persist(STORAGE_KEYS.roadmap, state.roadmap);
-    scheduleCloudDashboardSave();
-    renderAll();
-  });
 }
 
 function renderAll() {
-  renderFinance();
   renderCalendar();
   renderTasks();
-  renderFeatures();
   renderPulse();
   renderAdminConsole();
-  updateSystems();
 }
 
 function setupRouteLinks() {
@@ -335,7 +277,6 @@ async function handleSignup(event) {
 
 async function setAuthenticatedUser(user, options = {}) {
   authState.currentUser = normalizeProfileUser(user);
-  state.positions = loadCurrentUserPositions();
   persist(STORAGE_KEYS.sessionUser, authState.currentUser);
   document.body.classList.remove("locked");
   els.currentUserLabel.textContent = authState.currentUser.displayName || authState.currentUser.username;
@@ -350,7 +291,6 @@ async function setAuthenticatedUser(user, options = {}) {
 
 function lockDashboard() {
   authState.currentUser = null;
-  state.positions = [];
   localStorage.removeItem(STORAGE_KEYS.sessionUser);
   document.body.classList.add("locked");
   els.currentUserLabel.textContent = "Locked";
@@ -623,22 +563,6 @@ async function updateCloudUserProfile(id, profile) {
   }
 }
 
-function getCurrentUserFinanceKey() {
-  const username = authState.currentUser?.username ? normalizeUsername(authState.currentUser.username) : "locked";
-  return `${STORAGE_KEYS.positions}.${username}`;
-}
-
-function loadCurrentUserPositions() {
-  if (!authState.currentUser) return [];
-  return loadJson(getCurrentUserFinanceKey(), []);
-}
-
-function persistCurrentUserPositions(options = {}) {
-  if (!authState.currentUser) return;
-  persist(getCurrentUserFinanceKey(), state.positions);
-  if (!options.localOnly) scheduleCloudDashboardSave();
-}
-
 async function loadCloudDashboardState() {
   if (!cloudState.enabled || !authState.currentUser || !canUseServerApi()) return;
   try {
@@ -656,17 +580,9 @@ async function loadCloudDashboardState() {
 }
 
 function applyCloudDashboardPayload(payload) {
-  if (Array.isArray(payload.positions)) {
-    state.positions = payload.positions;
-    persistCurrentUserPositions({ localOnly: true });
-  }
   if (Array.isArray(payload.tasks)) {
     state.tasks = payload.tasks;
     persist(STORAGE_KEYS.tasks, state.tasks);
-  }
-  if (Array.isArray(payload.roadmap)) {
-    state.roadmap = payload.roadmap;
-    persist(STORAGE_KEYS.roadmap, state.roadmap);
   }
 }
 
@@ -685,9 +601,7 @@ async function saveCloudDashboardState() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         payload: {
-          positions: state.positions,
-          tasks: state.tasks,
-          roadmap: state.roadmap
+          tasks: state.tasks
         }
       })
     });
@@ -734,12 +648,10 @@ async function fetchOpenRouterModels() {
   if (!serverApi && !key) {
     setModelOptions(fallbackModels, localStorage.getItem(STORAGE_KEYS.model) || fallbackModels[0]);
     els.aiOutput.textContent = "Add your OpenRouter key to config.local.js.";
-    els.modelSyncProgress.value = 32;
     return;
   }
 
   els.aiLinkStatus.textContent = "Syncing";
-  els.modelSyncProgress.value = 56;
   try {
     const response = serverApi
       ? await fetch("/api/openrouter-models")
@@ -761,10 +673,8 @@ async function fetchOpenRouterModels() {
     const availableModels = fallbackModels.filter((model) => models.includes(model));
     setModelOptions(availableModels.length ? availableModels : fallbackModels, localStorage.getItem(STORAGE_KEYS.model));
     els.aiLinkStatus.textContent = "Online";
-    els.modelSyncProgress.value = 100;
   } catch (error) {
     els.aiLinkStatus.textContent = "Fallback";
-    els.modelSyncProgress.value = 42;
     setModelOptions(fallbackModels, localStorage.getItem(STORAGE_KEYS.model) || fallbackModels[0]);
     els.aiOutput.textContent = `${error.message}\nUsing fallback model list.`;
   }
@@ -797,12 +707,11 @@ async function runAiCommand() {
   els.aiOutput.textContent = "Reading command...";
 
   try {
-    const financeUpdate = await maybeApplyFinanceUpdate(prompt, key, serverApi);
     els.aiOutput.textContent = "Contacting OpenRouter...";
     const messages = [
       {
         role: "system",
-        content: "You are the AI layer inside BrodieDash. Be concise, operational, and specific. Avoid pretending to have live financial data unless supplied in context."
+        content: "You are the AI layer inside BrodieDash. Be concise, operational, and specific. Focus on tasks, planning, and dashboard operations."
       },
       {
         role: "user",
@@ -811,7 +720,7 @@ async function runAiCommand() {
     ];
     const payload = await sendOpenRouterChat({ key, serverApi, messages, temperature: 0.35 });
     const answer = payload.choices?.[0]?.message?.content || "No response content returned.";
-    els.aiOutput.textContent = financeUpdate ? `${financeUpdate}\n\n${answer}` : answer;
+    els.aiOutput.textContent = answer;
   } catch (error) {
     els.aiOutput.textContent = error.message;
   } finally {
@@ -854,335 +763,6 @@ async function sendOpenRouterChat({ key, serverApi, messages, temperature = 0.35
   }
 
   return response.json();
-}
-
-async function maybeApplyFinanceUpdate(prompt, key, serverApi) {
-  if (!authState.currentUser || !shouldAttemptFinanceExtraction(prompt)) return "";
-  els.aiOutput.textContent = "Updating finance profile...";
-  try {
-    const payload = await sendOpenRouterChat({
-      key,
-      serverApi,
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "Extract investment positions for BrodieDash from the user's command.",
-            "Return only JSON with this shape:",
-            '{"mode":"none|upsert|replace|clear","positions":[{"symbol":"AAPL","name":"Apple","qty":10,"avg":150,"price":175}],"notes":[]}',
-            "Use mode clear only when the user asks to clear/reset/delete all finance positions.",
-            "Use mode replace when the user says this is the full/new portfolio.",
-            "Use mode upsert when the user adds or updates holdings.",
-            "Do not invent live prices. If only current value is supplied, use qty 1 and avg/price equal to that value.",
-            "If the prompt is not about the user's own holdings, return mode none with an empty positions array."
-          ].join(" ")
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
-    });
-    const content = payload.choices?.[0]?.message?.content || "";
-    return applyFinanceExtraction(parseAiJson(content));
-  } catch (error) {
-    return `Finance update skipped: ${error.message}`;
-  }
-}
-
-function shouldAttemptFinanceExtraction(prompt) {
-  return /\b(portfolio|invest|investment|investments|stock|stocks|shares|share|etf|fund|crypto|holding|holdings|position|positions|bought|buy|own|ticker|avg|average|cost basis|allocation|finance|finances)\b/i.test(prompt);
-}
-
-function parseAiJson(content) {
-  const text = String(content).trim();
-  try {
-    return JSON.parse(text);
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("AI did not return finance JSON.");
-    return JSON.parse(match[0]);
-  }
-}
-
-function applyFinanceExtraction(extraction) {
-  const mode = String(extraction?.mode || "none").toLowerCase();
-  if (mode === "none") return "";
-
-  if (mode === "clear") {
-    state.positions = [];
-    persistCurrentUserPositions();
-    renderAll();
-    return "Finance tab updated: cleared personal positions.";
-  }
-
-  const positions = Array.isArray(extraction?.positions)
-    ? extraction.positions.map(normalizeExtractedPosition).filter(Boolean)
-    : [];
-  if (!positions.length) return "Finance update skipped: no complete positions were found.";
-
-  if (mode === "replace") {
-    state.positions = positions.map((position) => ({ ...position, id: crypto.randomUUID() }));
-  } else {
-    const next = [...state.positions];
-    positions.forEach((position) => {
-      const index = next.findIndex((item) => item.symbol === position.symbol);
-      if (index >= 0) {
-        next[index] = { ...next[index], ...position, id: next[index].id };
-      } else {
-        next.push({ ...position, id: crypto.randomUUID() });
-      }
-    });
-    state.positions = next;
-  }
-
-  persistCurrentUserPositions();
-  renderAll();
-  return `Finance tab updated: ${positions.map((position) => position.symbol).join(", ")}.`;
-}
-
-function normalizeExtractedPosition(raw) {
-  const symbol = String(raw?.symbol || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9.-]/g, "")
-    .slice(0, 12);
-  if (!symbol) return null;
-
-  const value = readPositiveNumber(raw?.value ?? raw?.currentValue ?? raw?.amount);
-  let qty = readPositiveNumber(raw?.qty ?? raw?.quantity ?? raw?.shares ?? raw?.units);
-  let avg = readNonNegativeNumber(raw?.avg ?? raw?.averageCost ?? raw?.costBasis ?? raw?.cost);
-  let price = readNonNegativeNumber(raw?.price ?? raw?.currentPrice ?? raw?.marketPrice);
-
-  if (qty === null && value !== null) {
-    qty = 1;
-    avg = avg ?? value;
-    price = price ?? value;
-  }
-  if (qty === null) return null;
-  if (price === null && avg !== null) price = avg;
-  if (avg === null && price !== null) avg = price;
-  if (avg === null || price === null) return null;
-
-  return {
-    symbol,
-    name: String(raw?.name || symbol).trim().slice(0, 64) || symbol,
-    qty,
-    avg,
-    price
-  };
-}
-
-function readPositiveNumber(value) {
-  const number = Number(String(value ?? "").replace(/[$,]/g, ""));
-  return Number.isFinite(number) && number > 0 ? number : null;
-}
-
-function readNonNegativeNumber(value) {
-  const number = Number(String(value ?? "").replace(/[$,]/g, ""));
-  return Number.isFinite(number) && number >= 0 ? number : null;
-}
-
-function renderFinance() {
-  const hasPositions = state.positions.length > 0;
-  const total = state.positions.reduce((sum, item) => sum + item.qty * item.price, 0);
-  const cost = state.positions.reduce((sum, item) => sum + item.qty * item.avg, 0);
-  const pnl = total - cost;
-  const pnlPct = cost ? (pnl / cost) * 100 : 0;
-  const positionStats = state.positions.map((item, index) => {
-    const value = item.qty * item.price;
-    const itemCost = item.qty * item.avg;
-    const itemPnl = value - itemCost;
-    const itemPnlPct = itemCost ? (itemPnl / itemCost) * 100 : 0;
-    const allocation = total ? (value / total) * 100 : 0;
-    return { ...item, value, itemCost, itemPnl, itemPnlPct, allocation, color: financeColor(index) };
-  });
-  const largest = positionStats.reduce((top, item) => item.value > (top?.value || 0) ? item : top, null);
-  const largestAllocation = largest ? largest.allocation : 0;
-  const cashLike = positionStats.filter((item) => /^(CASH|SGOV|BIL|TBIL|USFR|VMFXX)$/i.test(item.symbol));
-  const cashValue = cashLike.reduce((sum, item) => sum + item.value, 0);
-  const diversification = hasPositions
-    ? Math.max(0, Math.min(100, Math.round(100 - largestAllocation + Math.min(positionStats.length, 8) * 3)))
-    : 0;
-  const healthLabel = !hasPositions ? "--" : largestAllocation > 45 ? "Tight" : largestAllocation > 28 ? "Stable" : "Wide";
-  const financeModeChip = document.querySelector(".position-toolbar .chip");
-  if (financeModeChip) {
-    financeModeChip.textContent = authState.currentUser ? `${authState.currentUser.username} ledger` : "Personal ledger";
-  }
-
-  els.totalValue.textContent = formatCurrency(total);
-  els.portfolioValue.textContent = formatCurrency(total);
-  els.unrealizedPnL.textContent = `${formatCurrency(pnl)} (${pnlPct.toFixed(1)}%)`;
-  els.unrealizedPnL.className = pnl >= 0 ? "gain" : "loss";
-  els.pnlPill.textContent = hasPositions ? `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)} / ${pnlPct.toFixed(1)}%` : "$0";
-  els.pnlPill.className = `finance-pill ${pnl >= 0 ? "gain-pill" : "loss-pill"}`;
-  els.portfolioDelta.textContent = !hasPositions
-    ? "No personal positions"
-    : pnl >= 0 ? `${pnlPct.toFixed(1)}% unrealized gain` : `${Math.abs(pnlPct).toFixed(1)}% unrealized drawdown`;
-  els.portfolioDelta.className = pnl >= 0 ? "gain" : "loss";
-  els.riskTilt.textContent = !hasPositions ? "Empty" : largestAllocation > 45 ? "Concentrated" : largestAllocation > 28 ? "Moderate" : "Balanced";
-  els.riskTilt.className = "finance-pill";
-  els.cashReserve.textContent = formatCurrency(cashValue);
-  els.diversificationScore.textContent = `${diversification}%`;
-  els.financeHealth.textContent = healthLabel;
-  els.largestPosition.textContent = largest
-    ? `${largest.symbol} leads at ${largest.allocation.toFixed(1)}% of the portfolio.`
-    : "No personal positions loaded.";
-  els.allocationSummary.textContent = largest
-    ? `${positionStats.length} assets / ${largest.symbol} largest`
-    : "No assets";
-  els.positionSummary.textContent = `${positionStats.length} tracked asset${positionStats.length === 1 ? "" : "s"}`;
-  els.allocationRing.style.background = buildAllocationGradient(positionStats);
-
-  els.allocationBars.innerHTML = hasPositions ? positionStats.map((item) => `
-    <div class="allocation-bar">
-      <div>
-        <strong>${escapeHtml(item.symbol)}</strong>
-        <span>${item.allocation.toFixed(1)}%</span>
-      </div>
-      <span class="allocation-track"><span style="width: ${item.allocation.toFixed(1)}%; background: ${item.color};"></span></span>
-    </div>
-  `).join("") : `<div class="empty-state">No personal allocation data.</div>`;
-
-  els.positionsBody.innerHTML = hasPositions ? positionStats.map((item) => {
-    return `
-      <article class="position-card">
-        <div class="position-main">
-          <span class="asset-orb" style="--asset-color: ${item.color};">${escapeHtml(item.symbol.slice(0, 2))}</span>
-          <span class="asset-name">
-            <strong>${escapeHtml(item.symbol)}</strong>
-            <span>${escapeHtml(item.name)}</span>
-          </span>
-        </div>
-        <div class="position-spark" aria-hidden="true">${buildSparkline(item)}</div>
-        <div class="position-metrics">
-          <span><small>Qty</small><strong>${numberCompact(item.qty)}</strong></span>
-          <span><small>Value</small><strong>${formatCurrency(item.value)}</strong></span>
-          <span><small>P/L</small><strong class="${item.itemPnl >= 0 ? "gain" : "loss"}">${formatCurrency(item.itemPnl)}</strong></span>
-          <span><small>Alloc</small><strong>${item.allocation.toFixed(1)}%</strong></span>
-        </div>
-        <div class="position-allocation">
-          <span style="width: ${item.allocation.toFixed(1)}%; background: ${item.color};"></span>
-        </div>
-        <button class="delete-btn" data-delete-position="${item.id}" aria-label="Delete ${escapeHtml(item.symbol)}">X</button>
-      </article>`;
-  }).join("") : `<div class="empty-state">No positions saved for ${escapeHtml(authState.currentUser?.username || "this user")}.</div>`;
-
-  document.querySelectorAll("[data-delete-position]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.positions = state.positions.filter((item) => item.id !== button.dataset.deletePosition);
-      persistCurrentUserPositions();
-      renderAll();
-    });
-  });
-
-  renderFinanceRecommendations(positionStats, largestAllocation, pnlPct, cashValue, total);
-}
-
-function renderFinanceRecommendations(positionStats, largestAllocation, pnlPct, cashValue, total) {
-  if (!positionStats.length) {
-    els.financeRecommendations.innerHTML = `<div class="empty-state">No personal capital intelligence yet.</div>`;
-    return;
-  }
-
-  const largest = positionStats.reduce((top, item) => item.value > (top?.value || 0) ? item : top, null);
-  const cashPct = total ? (cashValue / total) * 100 : 0;
-  const recs = [
-    {
-      title: largestAllocation > 45 ? "Concentration watch" : "Top allocation",
-      body: largestAllocation > 45
-        ? `${largest.symbol} is ${largest.allocation.toFixed(1)}% of this profile; review whether that matches the user's risk target.`
-        : `${largest.symbol} leads at ${largest.allocation.toFixed(1)}%, with ${positionStats.length} tracked position${positionStats.length === 1 ? "" : "s"}.`
-    },
-    {
-      title: cashPct < 5 ? "Cash reserve low" : "Cash reserve",
-      body: cashPct < 5
-        ? `Cash-like holdings are ${cashPct.toFixed(1)}% of the portfolio.`
-        : `Cash-like holdings are ${cashPct.toFixed(1)}% of the portfolio.`
-    },
-    {
-      title: pnlPct < 0 ? "Drawdown status" : "Profit status",
-      body: pnlPct < 0
-        ? `Tracked cost basis shows a ${Math.abs(pnlPct).toFixed(1)}% unrealized drawdown.`
-        : `Tracked cost basis shows a ${pnlPct.toFixed(1)}% unrealized gain.`
-    }
-  ];
-
-  els.financeRecommendations.innerHTML = recs.map((rec) => `
-    <div class="rec-card">
-      <strong>${escapeHtml(rec.title)}</strong>
-      <p>${escapeHtml(rec.body)}</p>
-    </div>
-  `).join("");
-}
-
-function getOpenRouterKey() {
-  return HARDCODED_OPENROUTER_API_KEY.trim();
-}
-
-function canUseServerApi() {
-  return window.location.protocol === "http:" || window.location.protocol === "https:";
-}
-
-function canUseLocalFallback() {
-  return window.location.protocol === "file:"
-    || window.location.hostname === "localhost"
-    || window.location.hostname === "127.0.0.1"
-    || window.location.hostname === "::1";
-}
-
-function financeColor(index) {
-  return ["#36e6ff", "#61ff9b", "#ffbf5f", "#f36cff", "#ff5d78", "#8ea4ff", "#7dffdf"][index % 7];
-}
-
-function buildAllocationGradient(positionStats) {
-  if (!positionStats.length) {
-    return "conic-gradient(rgba(154, 167, 173, 0.2) 0 100%)";
-  }
-
-  let cursor = 0;
-  const stops = positionStats.map((item) => {
-    const start = cursor;
-    cursor += item.allocation;
-    return `${item.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
-  });
-  return `conic-gradient(${stops.join(", ")})`;
-}
-
-function buildSparkline(item) {
-  const seed = item.symbol.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return Array.from({ length: 16 }, (_, index) => {
-    const wave = Math.sin((seed + index * 17) * 0.34) * 18;
-    const trend = Math.max(-18, Math.min(18, item.itemPnlPct)) * (index / 16);
-    const height = Math.max(18, Math.min(82, 44 + wave + trend));
-    return `<span style="height: ${height.toFixed(0)}%;"></span>`;
-  }).join("");
-}
-
-function addPosition(event) {
-  event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  state.positions.push({
-    id: crypto.randomUUID(),
-    symbol: String(data.get("symbol")).trim().toUpperCase(),
-    name: String(data.get("name")).trim(),
-    qty: Number(data.get("qty")),
-    avg: Number(data.get("avg")),
-    price: Number(data.get("price"))
-  });
-  persistCurrentUserPositions();
-  event.currentTarget.reset();
-  renderAll();
-}
-
-function simulatePriceTick() {
-  state.positions = state.positions.map((position) => {
-    const movement = 1 + (Math.random() - 0.47) * 0.065;
-    return { ...position, price: Math.max(0.01, Number((position.price * movement).toFixed(2))) };
-  });
-  persistCurrentUserPositions();
-  renderAll();
 }
 
 function renderCalendar() {
@@ -1282,52 +862,14 @@ function addTask(event) {
   renderAll();
 }
 
-function renderFeatures() {
-  els.featureList.innerHTML = recommendedModules.map((feature) => {
-    const pinned = state.roadmap.includes(feature.title);
-    return `
-      <div class="feature-card">
-        <div>
-          <strong>${escapeHtml(feature.title)}</strong>
-          <p>${escapeHtml(feature.description)}</p>
-          <div class="feature-meta">${feature.tags.map((tag) => `<span class="chip">${escapeHtml(tag)}</span>`).join("")}</div>
-        </div>
-        <button class="${pinned ? "primary-btn" : "secondary-btn"}" data-pin-feature="${escapeHtml(feature.title)}">${pinned ? "Pinned" : "Pin"}</button>
-      </div>
-    `;
-  }).join("");
-
-  document.querySelectorAll("[data-pin-feature]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const title = button.dataset.pinFeature;
-      state.roadmap = state.roadmap.includes(title)
-        ? state.roadmap.filter((item) => item !== title)
-        : [...state.roadmap, title];
-      persist(STORAGE_KEYS.roadmap, state.roadmap);
-      scheduleCloudDashboardSave();
-      renderAll();
-    });
-  });
-}
-
 function renderPulse() {
   const activeTasks = state.tasks.filter((task) => !task.done).length;
   const highPriority = state.tasks.filter((task) => !task.done && task.priority === "High").length;
   els.taskCount.textContent = String(activeTasks);
   els.taskDelta.textContent = highPriority ? `${highPriority} high-priority active` : "No high-priority pressure";
-  els.roadmapCount.textContent = String(state.roadmap.length);
-  const focus = Math.min(100, activeTasks * 9 + highPriority * 12 + state.roadmap.length * 4);
+  const focus = Math.min(100, activeTasks * 9 + highPriority * 12);
   els.focusLoad.textContent = `${focus}%`;
-  els.automationScore.textContent = String(Math.max(48, 82 - activeTasks * 2 + state.roadmap.length * 3));
-}
-
-function updateSystems() {
-  const activeTasks = state.tasks.filter((task) => !task.done).length;
-  const total = state.positions.reduce((sum, item) => sum + item.qty * item.price, 0);
-  const largestAllocation = total ? Math.max(...state.positions.map((item) => (item.qty * item.price) / total)) * 100 : 0;
-  els.calendarPressure.value = Math.min(100, activeTasks * 11);
-  els.portfolioDrift.value = Math.min(100, largestAllocation);
-  els.roadmapClarity.value = Math.min(100, 18 + state.roadmap.length * 14);
+  els.automationScore.textContent = String(Math.max(48, 82 - activeTasks * 2));
 }
 
 function changeMonth(offset) {
@@ -1337,12 +879,8 @@ function changeMonth(offset) {
 
 function buildDashboardContext() {
   const username = authState.currentUser?.username || "Locked";
-  const positions = state.positions.length
-    ? state.positions.map((item) => `${item.symbol}: qty ${item.qty}, avg ${item.avg}, price ${item.price}`).join("\n")
-    : "No personal positions saved";
   const tasks = state.tasks.map((task) => `${task.date} | ${task.priority} | ${task.done ? "done" : "open"} | ${task.title}`).join("\n");
-  const roadmap = state.roadmap.length ? state.roadmap.join(", ") : "No pinned modules";
-  return `Current user: ${username}\n\nPositions:\n${positions}\n\nTasks:\n${tasks}\n\nPinned roadmap modules:\n${roadmap}`;
+  return `Current user: ${username}\n\nTasks:\n${tasks || "No tasks saved"}`;
 }
 
 function startClock() {
