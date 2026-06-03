@@ -49,13 +49,27 @@ let state = {
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
-  bindElements();
-  bindEvents();
-  await initializeAuth();
-  hydrateApiSettings();
-  renderAll();
-  startClock();
-  startCanvases();
+  try {
+    bindElements();
+    bindEvents();
+    await initializeAuth();
+    hydrateApiSettings();
+    renderAll();
+    startClock();
+    startCanvases();
+  } catch (error) {
+    showAuthError(`Startup error: ${error.message}`);
+    console.error(error);
+  }
+});
+
+window.addEventListener("error", (event) => {
+  showAuthError(`App error: ${event.message}`);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const message = event.reason?.message || String(event.reason || "Unknown promise error");
+  showAuthError(`App error: ${message}`);
 });
 
 function bindElements() {
@@ -69,6 +83,13 @@ function bindElements() {
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
+}
+
+function showAuthError(message) {
+  const authMessage = document.getElementById("authMessage");
+  if (authMessage) {
+    authMessage.textContent = message;
+  }
 }
 
 function hydrateApiSettings() {
@@ -170,52 +191,68 @@ function switchAuthView(view) {
 
 async function handleLogin(event) {
   event.preventDefault();
-  const username = normalizeUsername(els.loginUsername.value);
-  const password = els.loginPassword.value;
+  const submitButton = els.loginForm.querySelector("button[type='submit']");
+  submitButton.disabled = true;
+  submitButton.textContent = "Signing in";
+  els.authMessage.textContent = "Checking credentials...";
 
-  const cloudLogin = await loginWithCloud(username, password);
-  if (cloudLogin.handled) {
-    if (cloudLogin.user) {
-      cloudState.users = cloudLogin.users || null;
-      await setAuthenticatedUser(cloudLogin.user, { cloud: true });
+  try {
+    const username = normalizeUsername(els.loginUsername.value);
+    const password = els.loginPassword.value;
+
+    const cloudLogin = await loginWithCloud(username, password);
+    if (cloudLogin.handled) {
+      if (cloudLogin.user) {
+        cloudState.users = cloudLogin.users || null;
+        await setAuthenticatedUser(cloudLogin.user, { cloud: true });
+        els.authMessage.textContent = "Signed in.";
+        els.loginForm.reset();
+        return;
+      }
+      els.authMessage.textContent = cloudLogin.error;
+      return;
+    }
+    if (!canUseLocalFallback() && canUseServerApi()) {
+      els.authMessage.textContent = "Cloud login is unavailable. Check the Vercel database environment variables and redeploy.";
+      return;
+    }
+
+    if (username === ADMIN_ACCOUNT.username && password === ADMIN_ACCOUNT.password) {
+      await setAuthenticatedUser({ username: ADMIN_ACCOUNT.username, role: ADMIN_ACCOUNT.role });
+      els.authMessage.textContent = "Signed in.";
       els.loginForm.reset();
       return;
     }
-    els.authMessage.textContent = cloudLogin.error;
-    return;
-  }
-  if (!canUseLocalFallback() && canUseServerApi()) {
-    els.authMessage.textContent = "Cloud login is unavailable. Check the Vercel database environment variables and redeploy.";
-    return;
-  }
 
-  if (username === ADMIN_ACCOUNT.username && password === ADMIN_ACCOUNT.password) {
-    await setAuthenticatedUser({ username: ADMIN_ACCOUNT.username, role: ADMIN_ACCOUNT.role });
+    const user = loadUsers().find((item) => item.username === username);
+    if (!user) {
+      els.authMessage.textContent = "No approved account exists for that username.";
+      return;
+    }
+    if (user.status === "pending") {
+      els.authMessage.textContent = "That account is still waiting for Brodie approval.";
+      return;
+    }
+    if (user.status === "denied") {
+      els.authMessage.textContent = "That account request was denied.";
+      return;
+    }
+    const passwordHash = await hashPassword(password, user.salt);
+    if (passwordHash !== user.passwordHash) {
+      els.authMessage.textContent = "Incorrect password.";
+      return;
+    }
+
+    await setAuthenticatedUser({ username: user.username, role: "user" });
+    els.authMessage.textContent = "Signed in.";
     els.loginForm.reset();
-    return;
+  } catch (error) {
+    els.authMessage.textContent = `Login error: ${error.message}`;
+    console.error(error);
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Enter Dashboard";
   }
-
-  const user = loadUsers().find((item) => item.username === username);
-  if (!user) {
-    els.authMessage.textContent = "No approved account exists for that username.";
-    return;
-  }
-  if (user.status === "pending") {
-    els.authMessage.textContent = "That account is still waiting for Brodie approval.";
-    return;
-  }
-  if (user.status === "denied") {
-    els.authMessage.textContent = "That account request was denied.";
-    return;
-  }
-  const passwordHash = await hashPassword(password, user.salt);
-  if (passwordHash !== user.passwordHash) {
-    els.authMessage.textContent = "Incorrect password.";
-    return;
-  }
-
-  await setAuthenticatedUser({ username: user.username, role: "user" });
-  els.loginForm.reset();
 }
 
 async function handleSignup(event) {
