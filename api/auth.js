@@ -95,6 +95,14 @@ async function handleLogin(req, res, body) {
     res.status(200).json({ ok: true, user: publicUser(admin), users: await listUsers() });
     return;
   }
+  if (username === adminUsername) {
+    res.status(401).json({
+      error: process.env.BRODIEDASH_ADMIN_PASSWORD
+        ? "Admin password does not match BRODIEDASH_ADMIN_PASSWORD in Vercel."
+        : "Admin password does not match the prototype password."
+    });
+    return;
+  }
 
   const user = await getUserByUsername(username);
   if (!user) {

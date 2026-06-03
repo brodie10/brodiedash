@@ -481,7 +481,7 @@ async function loginWithCloud(username, password) {
         return { handled: false };
       }
       cloudState.enabled = true;
-      return { handled: true, error: payload.error || "Cloud login failed." };
+      return { handled: true, error: `Login failed (${response.status}): ${payload.error || "Cloud login failed."}` };
     }
     cloudState.enabled = true;
     return { handled: true, user: payload.user, users: payload.users || null };
