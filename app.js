@@ -651,6 +651,21 @@ async function saveCloudDashboardState() {
   }
 }
 
+function getOpenRouterKey() {
+  return HARDCODED_OPENROUTER_API_KEY.trim();
+}
+
+function canUseServerApi() {
+  return window.location.protocol === "http:" || window.location.protocol === "https:";
+}
+
+function canUseLocalFallback() {
+  return window.location.protocol === "file:"
+    || window.location.hostname === "localhost"
+    || window.location.hostname === "127.0.0.1"
+    || window.location.hostname === "::1";
+}
+
 function normalizeUsername(value) {
   return String(value).trim().toLowerCase();
 }
