@@ -22,6 +22,15 @@ const preferredModels = [
 ];
 const fallbackModels = preferredModels.map((model) => model.id);
 const modelLabels = Object.fromEntries(preferredModels.map((model) => [model.id, model.label]));
+const modulePermissions = [
+  { id: "ai", label: "AI" },
+  { id: "finance", label: "Finance" },
+  { id: "calendar", label: "Calendar" },
+  { id: "roadmap", label: "Roadmap" },
+  { id: "systems", label: "Systems" },
+  { id: "admin", label: "Admin" }
+];
+const defaultModulePermissions = ["ai", "finance", "calendar", "roadmap", "systems"];
 
 const defaultPositions = [];
 
@@ -310,8 +319,13 @@ async function handleSignup(event) {
     username,
     salt,
     passwordHash: await hashPassword(password, salt),
+    role: "user",
     status: "pending",
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    displayName: username,
+    notes: "",
+    modulePermissions: defaultModulePermissions,
+    lastLoginAt: null
   });
   persist(STORAGE_KEYS.users, users);
   els.signupForm.reset();
@@ -320,12 +334,13 @@ async function handleSignup(event) {
 }
 
 async function setAuthenticatedUser(user, options = {}) {
-  authState.currentUser = user;
+  authState.currentUser = normalizeProfileUser(user);
   state.positions = loadCurrentUserPositions();
-  persist(STORAGE_KEYS.sessionUser, user);
+  persist(STORAGE_KEYS.sessionUser, authState.currentUser);
   document.body.classList.remove("locked");
-  els.currentUserLabel.textContent = user.username;
+  els.currentUserLabel.textContent = authState.currentUser.displayName || authState.currentUser.username;
   renderAdminAccess();
+  renderModuleAccess();
   renderAll();
   if (options.cloud) {
     await loadCloudDashboardState();
@@ -340,6 +355,7 @@ function lockDashboard() {
   document.body.classList.add("locked");
   els.currentUserLabel.textContent = "Locked";
   renderAdminAccess();
+  renderModuleAccess();
 }
 
 async function logout() {
@@ -359,9 +375,21 @@ function renderAdminAccess() {
   renderAdminConsole();
 }
 
+function renderModuleAccess() {
+  const user = authState.currentUser;
+  const allowed = user?.role === "admin"
+    ? modulePermissions.map((permission) => permission.id)
+    : user?.modulePermissions || [];
+  document.querySelectorAll("[data-route-link]").forEach((link) => {
+    const route = link.dataset.routeLink;
+    const visible = Boolean(user && allowed.includes(route) && (route !== "admin" || user.role === "admin"));
+    link.classList.toggle("hidden", !visible);
+  });
+}
+
 function renderAdminConsole() {
   if (!els.adminRequests) return;
-  const users = (cloudState.users || loadUsers()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const users = (cloudState.users || loadUsers()).map(normalizeProfileUser).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const pending = users.filter((user) => user.status === "pending").length;
   const approved = users.filter((user) => user.status === "approved").length + 1;
   els.pendingCount.textContent = String(pending);
@@ -374,11 +402,46 @@ function renderAdminConsole() {
 
   els.adminRequests.innerHTML = users.map((user) => `
     <article class="admin-request">
-      <div>
-        <strong>${escapeHtml(user.username)}</strong>
-        <span>${formatRequestDate(user.createdAt)}</span>
+      <div class="admin-user-main">
+        <div class="admin-user-title">
+          <div>
+            <strong>${escapeHtml(user.displayName || user.username)}</strong>
+            <span>@${escapeHtml(user.username)} / Requested ${formatRequestDate(user.createdAt)}</span>
+            <span>Last login: ${escapeHtml(formatOptionalDate(user.lastLoginAt))}</span>
+          </div>
+          <span class="status-pill ${escapeHtml(user.status)}">${escapeHtml(user.status)}</span>
+        </div>
+        <form class="admin-profile-form" data-profile-user="${escapeHtml(user.id)}">
+          <label class="field">
+            <span>Display Name</span>
+            <input name="displayName" value="${escapeHtml(user.displayName || "")}" maxlength="80">
+          </label>
+          <label class="field">
+            <span>Role</span>
+            <select name="role">
+              ${["user", "viewer", "editor"].map((role) => `
+                <option value="${role}" ${user.role === role ? "selected" : ""}>${role}</option>
+              `).join("")}
+            </select>
+          </label>
+          <label class="field admin-notes-field">
+            <span>Notes</span>
+            <textarea name="notes" rows="2" maxlength="800">${escapeHtml(user.notes || "")}</textarea>
+          </label>
+          <div class="admin-permissions" aria-label="Module permissions">
+            ${modulePermissions.map((permission) => `
+              <label>
+                <input type="checkbox" name="modulePermissions" value="${escapeHtml(permission.id)}" ${user.modulePermissions.includes(permission.id) ? "checked" : ""}>
+                <span>${escapeHtml(permission.label)}</span>
+              </label>
+            `).join("")}
+          </div>
+          <div class="admin-profile-actions">
+            <button class="secondary-btn" type="submit">Save Profile</button>
+            <span>${escapeHtml(formatReviewMeta(user))}</span>
+          </div>
+        </form>
       </div>
-      <span class="status-pill ${escapeHtml(user.status)}">${escapeHtml(user.status)}</span>
       <div class="admin-actions">
         <button class="secondary-btn" data-approve-user="${escapeHtml(user.id)}" type="button">Approve</button>
         <button class="delete-btn" data-deny-user="${escapeHtml(user.id)}" type="button">Deny</button>
@@ -392,6 +455,9 @@ function renderAdminConsole() {
   document.querySelectorAll("[data-deny-user]").forEach((button) => {
     button.addEventListener("click", () => updateUserStatus(button.dataset.denyUser, "denied"));
   });
+  document.querySelectorAll("[data-profile-user]").forEach((form) => {
+    form.addEventListener("submit", updateUserProfile);
+  });
 }
 
 async function updateUserStatus(id, status) {
@@ -404,6 +470,32 @@ async function updateUserStatus(id, status) {
   const users = loadUsers().map((user) => {
     if (user.id !== id) return user;
     return { ...user, status, reviewedAt: new Date().toISOString(), reviewedBy: ADMIN_ACCOUNT.username };
+  });
+  persist(STORAGE_KEYS.users, users);
+  renderAdminConsole();
+}
+
+async function updateUserProfile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.dataset.profileUser;
+  const data = new FormData(form);
+  const profile = {
+    displayName: String(data.get("displayName") || "").trim(),
+    role: String(data.get("role") || "user"),
+    notes: String(data.get("notes") || "").trim(),
+    modulePermissions: data.getAll("modulePermissions")
+  };
+
+  const cloudUsers = await updateCloudUserProfile(id, profile);
+  if (cloudUsers) {
+    renderAdminConsole();
+    return;
+  }
+
+  const users = loadUsers().map((user) => {
+    if (user.id !== id) return user;
+    return normalizeProfileUser({ ...user, ...profile });
   });
   persist(STORAGE_KEYS.users, users);
   renderAdminConsole();
@@ -508,6 +600,25 @@ async function updateCloudUserStatus(id, status) {
     return cloudState.users;
   } catch (error) {
     console.warn("BrodieDash cloud user update unavailable:", error.message);
+    return null;
+  }
+}
+
+async function updateCloudUserProfile(id, profile) {
+  if (!cloudState.enabled || !canUseServerApi()) return null;
+  try {
+    const response = await fetch("/api/auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update-profile", id, ...profile })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Cloud profile update failed.");
+    cloudState.users = payload.users || [];
+    return cloudState.users;
+  } catch (error) {
+    console.warn("BrodieDash cloud profile update unavailable:", error.message);
     return null;
   }
 }
@@ -1414,6 +1525,40 @@ function formatRequestDate(value) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function formatOptionalDate(value) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function formatReviewMeta(user) {
+  if (!user.reviewedAt) return "Not reviewed";
+  return `Reviewed ${formatOptionalDate(user.reviewedAt)} by ${user.reviewedBy || "admin"}`;
+}
+
+function normalizeProfileUser(user) {
+  const isAdmin = user.role === "admin";
+  const moduleList = Array.isArray(user.modulePermissions)
+    ? user.modulePermissions
+    : isAdmin ? modulePermissions.map((permission) => permission.id) : defaultModulePermissions;
+  return {
+    ...user,
+    role: ["admin", "user", "viewer", "editor"].includes(user.role) ? user.role : "user",
+    displayName: user.displayName || user.username,
+    notes: user.notes || "",
+    modulePermissions: modulePermissions
+      .map((permission) => permission.id)
+      .filter((permission) => moduleList.includes(permission)),
+    lastLoginAt: user.lastLoginAt || null
+  };
 }
 
 function escapeHtml(value) {

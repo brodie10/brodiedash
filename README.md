@@ -65,6 +65,7 @@ When the database routes are available, BrodieDash syncs login requests, admin a
 - Admin login: `brodiebulman` / `Brodie14!$`
 - New users can request access with a username and password.
 - Pending requests appear in the admin console for approval or denial.
+- Admins can manage each user's display name, app role, profile notes, last-login metadata, and module permissions.
 - Local file usage still stores requests and approvals in browser `localStorage`; Vercel deployments use the database routes when configured.
 - Finance positions are scoped per approved username in browser `localStorage`.
 - The AI command layer can extract investment holdings from a user's prompt and update that user's finance tab.

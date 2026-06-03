@@ -6,6 +6,8 @@ const DEFAULT_ADMIN = {
   username: "brodiebulman",
   password: "Brodie14!$"
 };
+const ALL_MODULE_PERMISSIONS = ["ai", "finance", "calendar", "roadmap", "systems", "admin"];
+const DEFAULT_MODULE_PERMISSIONS = ["ai", "finance", "calendar", "roadmap", "systems"];
 
 module.exports = async function handler(req, res) {
   try {
@@ -39,6 +41,10 @@ module.exports = async function handler(req, res) {
     }
     if (action === "update-user") {
       await handleUpdateUser(req, res, body);
+      return;
+    }
+    if (action === "update-profile") {
+      await handleUpdateProfile(req, res, body);
       return;
     }
 
@@ -84,6 +90,7 @@ async function handleLogin(req, res, body) {
   const adminUsername = normalizeUsername(process.env.BRODIEDASH_ADMIN_USERNAME || DEFAULT_ADMIN.username);
   if (username === adminUsername && password === getAdminPassword()) {
     const admin = await upsertAdmin(username, password);
+    await recordLastLogin(admin.username);
     res.setHeader("Set-Cookie", getSessionCookie(admin, req));
     res.status(200).json({ ok: true, user: publicUser(admin), users: await listUsers() });
     return;
@@ -107,6 +114,8 @@ async function handleLogin(req, res, body) {
     return;
   }
 
+  await recordLastLogin(user.username);
+  user.last_login_at = new Date().toISOString();
   res.setHeader("Set-Cookie", getSessionCookie(user, req));
   res.status(200).json({ ok: true, user: publicUser(user) });
 }
@@ -135,9 +144,16 @@ async function handleSignup(res, body) {
 
   const salt = crypto.randomBytes(16).toString("hex");
   await query(
-    `INSERT INTO brodiedash_users (id, username, password_hash, salt, role, status)
-     VALUES ($1, $2, $3, $4, 'user', 'pending')`,
-    [crypto.randomUUID(), username, hashPassword(password, salt), salt]
+    `INSERT INTO brodiedash_users (id, username, password_hash, salt, role, status, display_name, module_permissions)
+     VALUES ($1, $2, $3, $4, 'user', 'pending', $5, $6::jsonb)`,
+    [
+      crypto.randomUUID(),
+      username,
+      hashPassword(password, salt),
+      salt,
+      cleanText(body.displayName || username, 80),
+      JSON.stringify(DEFAULT_MODULE_PERMISSIONS)
+    ]
   );
   res.status(201).json({ ok: true, message: "Request submitted. Brodie can approve it in the admin console." });
 }
@@ -165,15 +181,42 @@ async function handleUpdateUser(req, res, body) {
   res.status(200).json({ ok: true, users: await listUsers() });
 }
 
+async function handleUpdateProfile(req, res, body) {
+  const session = getSessionFromRequest(req);
+  if (!session || session.role !== "admin") {
+    res.status(403).json({ error: "Admin access is required." });
+    return;
+  }
+
+  const id = String(body.id || "");
+  if (!id) {
+    res.status(400).json({ error: "A valid user id is required." });
+    return;
+  }
+
+  const role = normalizeProfileRole(body.role);
+  const displayName = cleanText(body.displayName, 80);
+  const notes = cleanText(body.notes, 800);
+  const modulePermissions = normalizeModulePermissions(body.modulePermissions);
+
+  await query(
+    `UPDATE brodiedash_users
+     SET role = $1, display_name = $2, notes = $3, module_permissions = $4::jsonb
+     WHERE id = $5 AND role <> 'admin'`,
+    [role, displayName, notes, JSON.stringify(modulePermissions), id]
+  );
+  res.status(200).json({ ok: true, users: await listUsers() });
+}
+
 async function upsertAdmin(username, password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const result = await query(
-    `INSERT INTO brodiedash_users (id, username, password_hash, salt, role, status)
-     VALUES ($1, $2, $3, $4, 'admin', 'approved')
+    `INSERT INTO brodiedash_users (id, username, password_hash, salt, role, status, display_name, module_permissions)
+     VALUES ($1, $2, $3, $4, 'admin', 'approved', 'Brodie Admin', $5::jsonb)
      ON CONFLICT (username)
      DO UPDATE SET password_hash = EXCLUDED.password_hash, salt = EXCLUDED.salt, role = 'admin', status = 'approved'
      RETURNING *`,
-    [crypto.randomUUID(), username, hashPassword(password, salt), salt]
+    [crypto.randomUUID(), username, hashPassword(password, salt), salt, JSON.stringify(ALL_MODULE_PERMISSIONS)]
   );
   return result.rows[0];
 }
@@ -185,12 +228,17 @@ async function getUserByUsername(username) {
 
 async function listUsers() {
   const result = await query(
-    `SELECT id, username, role, status, created_at, reviewed_at, reviewed_by
+    `SELECT id, username, role, status, created_at, reviewed_at, reviewed_by,
+       display_name, notes, module_permissions, last_login_at
      FROM brodiedash_users
      WHERE role <> 'admin'
      ORDER BY created_at DESC`
   );
   return result.rows.map(publicUser);
+}
+
+async function recordLastLogin(username) {
+  await query("UPDATE brodiedash_users SET last_login_at = NOW() WHERE username = $1", [username]);
 }
 
 function getAdminPassword() {
@@ -211,6 +259,20 @@ function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeProfileRole(value) {
+  const role = String(value || "user").trim().toLowerCase();
+  return ["user", "viewer", "editor"].includes(role) ? role : "user";
+}
+
+function cleanText(value, maxLength) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function normalizeModulePermissions(value) {
+  const input = Array.isArray(value) ? value : [];
+  return ALL_MODULE_PERMISSIONS.filter((permission) => input.includes(permission));
+}
+
 function publicUser(user) {
   return {
     id: user.id,
@@ -219,7 +281,13 @@ function publicUser(user) {
     status: user.status,
     createdAt: user.created_at,
     reviewedAt: user.reviewed_at,
-    reviewedBy: user.reviewed_by
+    reviewedBy: user.reviewed_by,
+    displayName: user.display_name || user.username,
+    notes: user.notes || "",
+    modulePermissions: Array.isArray(user.module_permissions)
+      ? user.module_permissions
+      : DEFAULT_MODULE_PERMISSIONS,
+    lastLoginAt: user.last_login_at
   };
 }
 
